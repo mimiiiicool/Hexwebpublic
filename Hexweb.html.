@@ -1,1 +1,2008 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hexlight — Read binaries like source code</title>
+<meta name="description" content="Hexlight is a reverse-engineering workbench: disassembler, decompiler, time-travel debugger and scripting — 37 architectures, one canvas.">
+<meta name="theme-color" content="#050908">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2 28 9v14L16 30 4 23V9z' fill='none' stroke='%232cff8f' stroke-width='2.5'/%3E%3Cpath d='M10 16h12M16 16l6-5M16 16l6 5' stroke='%2322d9ee' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<script>document.documentElement.classList.add('js');</script>
+<style>
+/* ============ tokens ============ */
+:root{
+  --bg0:#050908; --bg1:#080d0c; --bg2:#0c1412; --bg3:#111b17; --bg4:#16221d;
+  --line:rgba(140,255,200,.10); --line2:rgba(140,255,200,.20);
+  --grn:#2cff8f; --grn2:#19d97c; --cyn:#22d9ee; --mag:#ff4d9d; --amb:#ffb224;
+  --red:#ff5c5c; --blu:#4da6ff;
+  --tx:#e9f6ef; --tx2:#9fb9ac; --tx3:#647b6f;
+  --disp:'Space Grotesk',system-ui,sans-serif;
+  --body:'Inter',system-ui,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --acc:var(--grn); --nav-h:64px;
+}
+@property --ang{syntax:'<angle>';initial-value:0deg;inherits:false}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth;scrollbar-gutter:stable}
+body{background:var(--bg0);color:var(--tx);font-family:var(--body);font-size:16px;line-height:1.6;min-width:320px;overflow-x:hidden}
+::selection{background:var(--grn);color:#04120b}
+:focus-visible{outline:2px solid var(--cyn);outline-offset:2px;border-radius:4px}
+img,svg{display:block;max-width:100%}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+input{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}
+h1,h2,h3,h4{font-family:var(--disp);line-height:1.08;letter-spacing:-.02em;font-weight:700}
+code,kbd,pre,.mono{font-family:var(--mono)}
+section{scroll-margin-top:calc(var(--nav-h) + 18px);position:relative}
+.wrap{max-width:1240px;margin:0 auto;padding:0 28px;position:relative}
+/* scrollbars — artifact palette */
+*{scrollbar-width:thin;scrollbar-color:#1d9a63 #0a100e}
+*::-webkit-scrollbar{width:10px;height:10px}
+*::-webkit-scrollbar-track{background:#0a100e}
+*::-webkit-scrollbar-thumb{background:linear-gradient(180deg,var(--grn2),#0f8f9c);border-radius:8px;border:2px solid #0a100e}
+*::-webkit-scrollbar-thumb:hover{background:linear-gradient(180deg,var(--grn),var(--cyn))}
+.pane::-webkit-scrollbar,.pal-list::-webkit-scrollbar,.scr-out::-webkit-scrollbar{width:7px;height:7px}
+/* grain + aurora */
+.grain{position:fixed;inset:-40px;z-index:2000;pointer-events:none;opacity:.055;mix-blend-mode:overlay;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E")}
+.aurora{position:fixed;inset:0;z-index:-2;overflow:hidden;background:var(--bg0)}
+.aurora i{position:absolute;border-radius:50%;filter:blur(90px);opacity:.5}
+.aurora .a1{width:60vw;height:60vw;left:-18vw;top:-22vw;background:radial-gradient(circle,rgba(25,217,124,.28),transparent 65%);animation:drift1 26s ease-in-out infinite alternate}
+.aurora .a2{width:52vw;height:52vw;right:-16vw;top:6vh;background:radial-gradient(circle,rgba(34,217,238,.20),transparent 65%);animation:drift2 32s ease-in-out infinite alternate}
+.aurora .a3{width:46vw;height:46vw;left:22vw;bottom:-24vw;background:radial-gradient(circle,rgba(255,77,157,.13),transparent 65%);animation:drift1 38s ease-in-out infinite alternate-reverse}
+@keyframes drift1{to{transform:translate(9vw,7vh) scale(1.15)}}
+@keyframes drift2{to{transform:translate(-8vw,9vh) scale(.9)}}
+/* reveals */
+.js .rv{opacity:0;translate:0 26px;transition:opacity .8s cubic-bezier(.2,.7,.2,1),translate .8s cubic-bezier(.2,.7,.2,1);transition-delay:var(--d,0s)}
+.js .rv.in{opacity:1;translate:0 0}
+/* type helpers */
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--acc);display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.eyebrow::before{content:"";width:26px;height:1px;background:var(--acc)}
+.sec-head h2{font-size:clamp(30px,4.4vw,52px);margin-bottom:14px}
+.sec-head .lede{color:var(--tx2);max-width:620px;font-size:17px}
+.grad{background:linear-gradient(100deg,var(--grn) 5%,var(--cyn) 48%,var(--mag) 95%);-webkit-background-clip:text;background-clip:text;color:transparent}
+.sec{padding:110px 0}
+.sec::before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(720px 340px at 18% 0%,color-mix(in srgb,var(--acc) 7%,transparent),transparent 70%)}
+/* buttons */
+.btn{display:inline-flex;align-items:center;gap:9px;font-family:var(--disp);font-weight:600;font-size:15px;padding:12px 22px;border-radius:10px;transition:transform .18s,box-shadow .25s,background .25s,border-color .25s;white-space:nowrap}
+.btn:active{transform:scale(.97)}
+.btn-p{background:linear-gradient(120deg,var(--grn),#3be8c9);color:#03130c;box-shadow:0 8px 28px rgba(44,255,143,.22)}
+.btn-p:hover{box-shadow:0 12px 38px rgba(44,255,143,.36);transform:translateY(-2px)}
+.btn-s{border:1px solid var(--line2);color:var(--tx);background:rgba(140,255,200,.04)}
+.btn-s:hover{border-color:var(--grn);background:rgba(44,255,143,.09);transform:translateY(-2px)}
+.btn-sm{padding:8px 15px;font-size:13.5px;border-radius:8px}
+.chip{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11.5px;padding:4px 11px;border-radius:99px;border:1px solid var(--line2);color:var(--tx2)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--grn);box-shadow:0 0 10px var(--grn);animation:pulse 2.2s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.45}}
+/* ============ nav ============ */
+.nav{position:fixed;top:0;left:0;right:0;height:var(--nav-h);z-index:900;display:flex;align-items:center;border-bottom:1px solid transparent;transition:background .3s,border-color .3s;backdrop-filter:blur(14px) saturate(1.3);-webkit-backdrop-filter:blur(14px) saturate(1.3)}
+.nav.scrolled{background:rgba(5,9,8,.82);border-color:var(--line)}
+.nav .wrap{display:flex;align-items:center;gap:26px;width:100%}
+.progress{position:absolute;top:0;left:0;height:2px;width:0;background:linear-gradient(90deg,var(--grn),var(--cyn),var(--mag));z-index:2}
+.logo{display:flex;align-items:center;gap:10px;font-family:var(--disp);font-weight:700;font-size:19px;letter-spacing:-.02em}
+.logo svg{width:27px;height:27px}
+.logo:hover .beam{stroke-dashoffset:0}
+.beam{stroke-dasharray:40;stroke-dashoffset:0;transition:stroke-dashoffset .6s}
+.nav-links{display:flex;gap:4px;margin-left:8px}
+.nav-link{font-size:13.5px;font-weight:500;color:var(--tx2);padding:7px 11px;border-radius:8px;position:relative;transition:color .2s,background .2s}
+.nav-link:hover{color:var(--tx);background:rgba(140,255,200,.06)}
+.nav-link.on{color:var(--grn)}
+.nav-link.on::after{content:"";position:absolute;left:11px;right:11px;bottom:2px;height:2px;border-radius:2px;background:linear-gradient(90deg,var(--grn),var(--cyn))}
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.cmdk{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--tx2);border:1px solid var(--line2);padding:7px 12px;border-radius:8px;transition:border-color .2s,color .2s}
+.cmdk:hover{border-color:var(--cyn);color:var(--cyn)}
+.cmdk kbd{background:var(--bg3);padding:1px 6px;border-radius:5px;font-size:11px;border:1px solid var(--line)}
+.menu-btn{display:none;width:40px;height:40px;border:1px solid var(--line2);border-radius:9px;place-items:center}
+.menu-btn svg{width:18px;height:18px;stroke:var(--tx)}
+.mobile-menu{position:fixed;top:var(--nav-h);left:0;right:0;z-index:890;background:rgba(6,11,10,.97);border-bottom:1px solid var(--line2);max-height:0;overflow:hidden;transition:max-height .4s cubic-bezier(.2,.7,.2,1);backdrop-filter:blur(16px)}
+.mobile-menu.open{max-height:440px}
+.mobile-menu nav{display:flex;flex-direction:column;padding:14px 24px 22px;gap:2px}
+.mobile-menu .nav-link{font-size:16px;padding:11px 10px}
+.mobile-menu .btn{margin-top:12px;justify-content:center}
+/* ============ hero ============ */
+.hero{padding:calc(var(--nav-h) + 64px) 0 40px;position:relative;overflow:hidden}
+#bgCanvas{position:absolute;inset:0;z-index:0;pointer-events:none}
+.hero .wrap{z-index:1}
+.hero-grid{display:grid;grid-template-columns:1.5fr 1fr;gap:48px;align-items:end;margin-bottom:52px}
+.badge{margin-bottom:22px}
+.hero h1{font-size:clamp(42px,6.4vw,84px);letter-spacing:-.035em}
+.hero .sub{color:var(--tx2);font-size:clamp(16px,1.6vw,18.5px);max-width:560px;margin:22px 0 30px}
+.cta-row{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+.hero-meta{font-family:var(--mono);font-size:12px;color:var(--tx3);margin-top:18px}
+.hero-meta b{color:var(--tx2);font-weight:500}
+/* stats readout */
+.stats{position:relative;border:1px solid var(--line2);background:linear-gradient(180deg,rgba(17,27,23,.75),rgba(10,16,14,.75));border-radius:14px;padding:22px 24px;font-family:var(--mono)}
+.stats::before,.stats::after{content:"";position:absolute;width:14px;height:14px;border:2px solid var(--grn);opacity:.7}
+.stats::before{top:-2px;left:-2px;border-right:0;border-bottom:0;border-radius:4px 0 0 0}
+.stats::after{bottom:-2px;right:-2px;border-left:0;border-top:0;border-radius:0 0 4px 0}
+.stats-head{font-size:11px;color:var(--tx3);letter-spacing:.1em;margin-bottom:14px}
+.stats-head b{color:var(--grn);font-weight:500}
+.stat-row{display:flex;align-items:baseline;justify-content:space-between;padding:9px 0;border-bottom:1px dashed var(--line)}
+.stat-row:last-of-type{border-bottom:0}
+.stat-num{font-family:var(--disp);font-weight:700;font-size:30px;color:var(--tx)}
+.stat-num em{font-style:normal;color:var(--grn);font-size:19px}
+.stat-lbl{font-size:11.5px;color:var(--tx2);text-align:right}
+.stat-lbl small{display:block;color:var(--tx3);font-size:10.5px}
+.spark{margin-top:12px;width:100%;height:34px}
+.spark polyline{fill:none;stroke:url(#sparkGrad);stroke-width:2;stroke-dasharray:400;stroke-dashoffset:400;animation:draw 2.2s .6s cubic-bezier(.2,.7,.2,1) forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+/* ============ workbench ============ */
+.wb-wrap{position:relative;z-index:1}
+.wb-par{will-change:translate}
+.wb{position:relative;border:1px solid var(--line2);border-radius:16px;background:linear-gradient(180deg,#0d1613,#0a100e);box-shadow:0 30px 90px rgba(0,0,0,.55),0 0 80px rgba(44,255,143,.06);overflow:hidden}
+.wb.cracked{border-color:transparent;background:linear-gradient(180deg,#0d1613,#0a100e) padding-box,conic-gradient(from var(--ang),var(--grn),var(--cyn),var(--mag),var(--amb),var(--grn)) border-box;animation:angspin 4s linear infinite}
+@keyframes angspin{to{--ang:360deg}}
+.wb-title{display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:12px}
+.lights{display:flex;gap:7px}
+.lights i{width:11px;height:11px;border-radius:50%}
+.lights i:nth-child(1){background:#ff5f57}.lights i:nth-child(2){background:#febc2e}.lights i:nth-child(3){background:#28c840}
+.wb-file{color:var(--tx2)}.wb-file b{color:var(--tx);font-weight:500}
+.wb-arch{color:var(--tx3);font-size:11px}
+.crack-badge{margin-left:auto;display:none;align-items:center;gap:6px;color:#04120b;background:linear-gradient(120deg,var(--grn),var(--cyn));font-weight:700;font-size:10.5px;letter-spacing:.1em;padding:3px 10px;border-radius:99px}
+.wb.cracked .crack-badge{display:inline-flex;animation:pop .45s cubic-bezier(.2,1.6,.4,1)}
+@keyframes pop{from{scale:.4;opacity:0}}
+.wb-tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:11px 16px;border-bottom:1px solid var(--line);background:rgba(140,255,200,.025)}
+.tbtn{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:12px;font-weight:500;padding:7px 13px;border-radius:8px;border:1px solid var(--line2);color:var(--tx2);transition:all .2s}
+.tbtn:hover{color:var(--tx);border-color:var(--grn);background:rgba(44,255,143,.08)}
+.tbtn.primary{background:linear-gradient(120deg,var(--grn),#3be8c9);color:#03130c;border-color:transparent;font-weight:700}
+.tbtn.primary:hover{box-shadow:0 4px 18px rgba(44,255,143,.35)}
+.tbtn[aria-pressed="true"]{border-color:var(--amb);color:var(--amb);background:rgba(255,178,36,.09)}
+.key-field{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--tx3);margin-left:auto}
+.key-field input{width:172px;background:var(--bg1);border:1px solid var(--line2);border-radius:8px;padding:7px 11px;font-family:var(--mono);font-size:12.5px;color:var(--grn);letter-spacing:.06em;transition:border-color .2s,box-shadow .2s}
+.key-field input:focus{outline:none;border-color:var(--cyn);box-shadow:0 0 0 3px rgba(34,217,238,.15)}
+.wb.cracked .key-field input{border-color:var(--grn);box-shadow:0 0 14px rgba(44,255,143,.25)}
+.hint-bar{display:none;padding:10px 18px;font-family:var(--mono);font-size:12px;color:var(--amb);background:rgba(255,178,36,.06);border-bottom:1px solid rgba(255,178,36,.2)}
+.hint-bar.show{display:block}
+.hint-bar code{color:var(--tx);background:rgba(255,178,36,.14);padding:1px 6px;border-radius:5px}
+.pane-tabs{display:none;gap:6px;padding:9px 14px;border-bottom:1px solid var(--line)}
+.pane-tabs .tbtn{flex:1;justify-content:center}
+.pane-tabs .tbtn[aria-pressed="true"]{border-color:var(--cyn);color:var(--cyn);background:rgba(34,217,238,.08)}
+.wb-grid{display:grid;grid-template-columns:184px minmax(0,1fr) 324px;grid-template-areas:"side dis decomp" "side hex regs"}
+.wb-side{grid-area:side;border-right:1px solid var(--line);padding:12px 10px;display:flex;flex-direction:column;gap:2px;font-family:var(--mono)}
+.side-lbl{font-size:10px;letter-spacing:.16em;color:var(--tx3);padding:8px 8px 5px;text-transform:uppercase}
+.fn-item{display:flex;align-items:center;gap:8px;width:100%;text-align:left;font-family:var(--mono);font-size:12px;color:var(--tx2);padding:7px 9px;border-radius:7px;border-left:2px solid transparent;transition:all .15s}
+.fn-item:hover{background:rgba(140,255,200,.06);color:var(--tx)}
+.fn-item.on{background:rgba(44,255,143,.09);color:var(--grn);border-left-color:var(--grn)}
+.fn-item .fx{color:var(--mag);font-weight:700}
+.fn-item.sym .fx{color:var(--amb)}
+.fn-item small{margin-left:auto;color:var(--tx3);font-size:10px}
+.side-meta{margin-top:auto;padding:10px 8px 4px;font-size:10.5px;color:var(--tx3);border-top:1px dashed var(--line);line-height:1.9}
+.side-meta b{color:var(--tx2);font-weight:500}
+.pane{position:relative;overflow:auto;min-width:0}
+.pane-head{position:sticky;top:0;z-index:3;display:flex;align-items:center;gap:10px;padding:8px 14px;background:rgba(10,16,14,.94);backdrop-filter:blur(6px);border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--tx3)}
+.pane-head b{color:var(--tx2);font-weight:500}
+.xref{font-family:var(--mono);font-size:10.5px;color:var(--cyn);border:1px solid rgba(34,217,238,.3);padding:2px 8px;border-radius:99px;transition:all .2s}
+.xref:hover{background:rgba(34,217,238,.12)}
+.pane-dis{grid-area:dis;max-height:342px;border-right:1px solid var(--line)}
+.insn{display:grid;grid-template-columns:78px 168px minmax(0,1fr);gap:10px;align-items:center;padding:3.5px 14px;font-family:var(--mono);font-size:12px;cursor:pointer;border-left:2px solid transparent;transition:background .12s}
+.insn:hover{background:rgba(233,246,239,.045)}
+.insn .ad{color:var(--tx3)}
+.insn .by{color:#4f6a5d;font-size:10.5px;letter-spacing:.02em;white-space:nowrap;overflow:hidden}
+.insn .mn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--tx2)}
+.insn .mn b{color:var(--cyn);font-weight:500}
+.insn .mn .rg{color:var(--tx)}
+.insn .mn .im{color:var(--amb)}
+.insn .mn .cm{color:#54705f;font-style:italic}
+.insn.sel{border-left-color:var(--cyn);background:rgba(34,217,238,.07)}
+.insn.act{border-left-color:var(--grn);background:rgba(44,255,143,.12)}
+.insn.act .ad{color:var(--grn)}
+.pane-dec{grid-area:decomp;max-height:342px}
+.dec-line{display:block;padding:3.5px 14px;font-family:var(--mono);font-size:12px;color:var(--tx2);white-space:pre;border-left:2px solid transparent;transition:background .12s}
+.dec-line .kw{color:var(--mag)}.dec-line .ty{color:var(--cyn)}.dec-line .fn{color:var(--grn)}.dec-line .nm{color:var(--amb)}.dec-line .cm{color:#54705f;font-style:italic}.dec-line .st{color:#a8e6c3}
+.dec-line.act{background:rgba(34,217,238,.1);border-left-color:var(--cyn)}
+.dec-note{margin:16px 14px;padding:14px;border:1px dashed var(--line2);border-radius:10px;font-family:var(--mono);font-size:11.5px;color:var(--tx2);line-height:1.8}
+.dec-note b{color:var(--amb);font-weight:500}
+.bottom-tabs{display:flex;gap:4px;margin-left:auto}
+.btab{font-family:var(--mono);font-size:10.5px;color:var(--tx3);padding:2px 9px;border-radius:6px;transition:all .15s}
+.btab[aria-pressed="true"]{color:var(--grn);background:rgba(44,255,143,.1)}
+.pane-hex{grid-area:hex;max-height:196px;border-right:1px solid var(--line);border-top:1px solid var(--line)}
+.hex-row{display:flex;gap:14px;padding:3px 14px;font-family:var(--mono);font-size:11.5px;align-items:baseline}
+.hex-row .ad{color:var(--tx3);flex:none}
+.hex-bytes{display:flex;flex-wrap:wrap;gap:2px}
+.hx{padding:1px 3px;border-radius:4px;color:var(--tx2);cursor:pointer;transition:background .12s}
+.hx:hover{background:rgba(233,246,239,.08)}
+.hx.sel{background:rgba(34,217,238,.18);color:var(--cyn)}
+.hx.act{background:rgba(44,255,143,.25);color:var(--grn)}
+.hex-asc{color:#5d7a6b;letter-spacing:.12em;flex:none;margin-left:auto}
+.pane-con{grid-area:hex;max-height:196px;border-right:1px solid var(--line);border-top:1px solid var(--line);display:none}
+.pane-con .log{padding:4px 14px;font-family:var(--mono);font-size:11.5px;display:flex;gap:9px;line-height:1.75}
+.log .tag{flex:none;font-weight:700}
+.log.ok .tag{color:var(--grn)}.log.info .tag{color:var(--cyn)}.log.warn .tag{color:var(--amb)}.log.err .tag{color:var(--red)}.log.dim .tag{color:var(--tx3)}
+.log .msg{color:var(--tx2);word-break:break-word}
+.log.ok .msg{color:var(--grn)}
+.pane-reg{grid-area:regs;border-top:1px solid var(--line);padding-bottom:8px}
+.reg-row{display:flex;justify-content:space-between;padding:3.5px 16px;font-family:var(--mono);font-size:12px}
+.reg-row .rn{color:var(--tx3)}
+.reg-row .rval{color:var(--tx);transition:color .1s}
+.reg-row .rval.flash{animation:regflash .5s}
+@keyframes regflash{0%{color:var(--grn);text-shadow:0 0 12px var(--grn)}100%{color:var(--tx)}}
+.flags{display:flex;gap:6px;padding:6px 16px 0}
+.flag{font-family:var(--mono);font-size:10.5px;padding:2px 9px;border-radius:99px;border:1px solid var(--line);color:var(--tx3)}
+.flag.on{border-color:var(--grn);color:var(--grn);background:rgba(44,255,143,.08)}
+.wb-status{display:flex;align-items:center;gap:12px;padding:8px 16px;border-top:1px solid var(--line);font-family:var(--mono);font-size:11.5px;background:rgba(5,9,8,.6)}
+.led{width:8px;height:8px;border-radius:50%;background:var(--tx3);flex:none}
+.led.run{background:var(--grn);box-shadow:0 0 10px var(--grn);animation:pulse 1s infinite}
+.led.ok{background:var(--grn);box-shadow:0 0 10px var(--grn)}
+.led.bad{background:var(--red);box-shadow:0 0 10px var(--red)}
+#statusText{color:var(--tx2);flex:none}
+#statusMsg{color:var(--tx3);margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.wb-burst{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:5}
+.spark-p{position:absolute;left:50%;top:80px;width:7px;height:7px;border-radius:2px;background:var(--hue);animation:fly .85s cubic-bezier(.1,.8,.3,1) forwards}
+@keyframes fly{to{transform:translate(var(--tx),var(--ty)) rotate(300deg);opacity:0}}
+.wb-caption{display:flex;align-items:center;gap:10px;justify-content:center;margin-top:20px;font-family:var(--mono);font-size:12px;color:var(--tx3);flex-wrap:wrap;text-align:center}
+.wb-caption b{color:var(--amb);font-weight:500}
+/* ============ marquee ============ */
+.mq{border-block:1px solid var(--line);padding:18px 0;overflow:hidden;background:rgba(10,16,14,.5);position:relative}
+.mq::before,.mq::after{content:"";position:absolute;top:0;bottom:0;width:120px;z-index:2;pointer-events:none}
+.mq::before{left:0;background:linear-gradient(90deg,var(--bg0),transparent)}
+.mq::after{right:0;background:linear-gradient(-90deg,var(--bg0),transparent)}
+.mq-track{display:flex;width:max-content;animation:mq 30s linear infinite}
+.mq:hover .mq-track{animation-play-state:paused}
+@keyframes mq{to{transform:translateX(-50%)}}
+.mq-group{display:flex;gap:38px;padding-right:38px;font-family:var(--mono);font-size:13px;color:var(--tx2)}
+.mq-group span{display:flex;align-items:center;gap:9px;white-space:nowrap}
+.mq-group i{width:6px;height:6px;border-radius:50%;flex:none}
+/* ============ features bento ============ */
+#features{--acc:var(--cyn)}
+.bento{display:grid;grid-template-columns:repeat(6,1fr);gap:18px;margin-top:52px}
+.card{position:relative;border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,var(--bg2),var(--bg1));padding:24px;overflow:hidden;transition:transform .25s,border-color .25s,box-shadow .25s;min-width:0}
+.card:hover{transform:translateY(-4px);border-color:color-mix(in srgb,var(--acc) 45%,transparent);box-shadow:0 18px 50px rgba(0,0,0,.4)}
+.spot::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .3s;background:radial-gradient(260px at var(--mx,50%) var(--my,50%),color-mix(in srgb,var(--acc) 12%,transparent),transparent 70%)}
+.spot:hover::after{opacity:1}
+.card h3{font-size:19px;margin-bottom:8px}
+.card .cp{color:var(--tx2);font-size:13.5px;line-height:1.65;margin-bottom:16px}
+.card .kicker{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;color:var(--acc);text-transform:uppercase;margin-bottom:12px;display:block}
+.b-a{grid-column:span 4}.b-b,.b-c,.b-d,.b-e{grid-column:span 2}.b-f{grid-column:span 6}
+.seg{display:inline-flex;border:1px solid var(--line2);border-radius:9px;padding:3px;gap:3px;margin-bottom:14px}
+.seg button{font-family:var(--mono);font-size:11.5px;padding:5px 13px;border-radius:6px;color:var(--tx3);transition:all .2s}
+.seg button[aria-pressed="true"]{background:rgba(34,217,238,.14);color:var(--cyn)}
+.snippet{display:none;background:var(--bg0);border:1px solid var(--line);border-radius:11px;padding:16px 18px;font-size:12px;line-height:1.8;overflow-x:auto;color:var(--tx2)}
+.snippet.on{display:block}
+.snippet .kw{color:var(--mag)}.snippet .ty{color:var(--cyn)}.snippet .fn{color:var(--grn)}.snippet .nm{color:var(--amb)}.snippet .cm{color:#54705f;font-style:italic}.snippet .st{color:#a8e6c3}
+.conf-row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.arch-cloud{display:flex;flex-wrap:wrap;gap:8px}
+.arch-chip{font-family:var(--mono);font-size:11.5px;padding:5px 11px;border-radius:99px;border:1px solid var(--line2);color:var(--tx2);animation:bob 5s ease-in-out infinite alternate;animation-delay:var(--bd,0s)}
+.arch-chip.hot{border-color:rgba(44,255,143,.4);color:var(--grn)}
+@keyframes bob{to{translate:0 -4px}}
+.fmt-row{display:flex;gap:7px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px dashed var(--line)}
+.fmt-row span{font-family:var(--mono);font-size:10px;color:var(--tx3);border:1px solid var(--line);padding:2px 8px;border-radius:5px}
+.scrub-out{background:var(--bg0);border:1px solid var(--line);border-radius:11px;padding:13px 15px;font-family:var(--mono);font-size:12px;margin-bottom:14px}
+.scrub-out .so-rip{color:var(--cyn)}.scrub-out .so-in{color:var(--tx);margin:4px 0}.scrub-out .so-rax{color:var(--amb)}
+.scrub-out .so-step{color:var(--tx3);font-size:10.5px}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:22px;background:transparent;cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:5px;border-radius:3px;background:linear-gradient(90deg,var(--grn),var(--cyn),var(--mag))}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:17px;height:17px;border-radius:50%;background:var(--tx);border:3px solid var(--cyn);margin-top:-6px;box-shadow:0 0 12px rgba(34,217,238,.6);transition:transform .15s}
+input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2)}
+input[type=range]::-moz-range-track{height:5px;border-radius:3px;background:linear-gradient(90deg,var(--grn),var(--cyn),var(--mag))}
+input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--tx);border:3px solid var(--cyn);box-shadow:0 0 12px rgba(34,217,238,.6)}
+.cg{width:100%;height:auto}
+.cg .edge{stroke:#3a5347;stroke-width:1.4;fill:none;stroke-dasharray:4 6;animation:dashf 1.3s linear infinite;transition:opacity .25s,stroke .25s}
+@keyframes dashf{to{stroke-dashoffset:-10}}
+.cg[data-hot] .edge{opacity:.14}
+.cg[data-hot="main"] .e-main,.cg[data-hot="check"] .e-check,.cg[data-hot="strlen"] .e-strlen,.cg[data-hot="fail"] .e-fail,.cg[data-hot="ok"] .e-ok{opacity:1;stroke:var(--cyn)}
+.cg-node{cursor:pointer}
+.cg-node rect{fill:var(--bg3);stroke:var(--line2);rx:7;transition:stroke .2s}
+.cg-node:hover rect{stroke:var(--grn)}
+.cg-node text{font-family:var(--mono);font-size:10px;fill:var(--tx2)}
+.cg-cap{font-family:var(--mono);font-size:10.5px;color:var(--tx3);margin-top:10px}
+.mini-code{background:var(--bg0);border:1px solid var(--line);border-radius:11px;padding:14px 16px;font-size:11.5px;line-height:1.85;color:var(--tx2);overflow-x:auto}
+.arrow-link{display:inline-flex;align-items:center;gap:7px;font-family:var(--disp);font-weight:600;font-size:13.5px;color:var(--cyn);margin-top:14px}
+.arrow-link svg{transition:translate .2s}
+.arrow-link:hover svg{translate:4px 0}
+/* collab */
+.collab-stage{position:relative;height:190px;border:1px solid var(--line);border-radius:12px;background:var(--bg0);overflow:hidden;margin-top:6px}
+.collab-code{position:absolute;inset:14px 18px;font-family:var(--mono);font-size:11.5px;line-height:2;opacity:.16;color:var(--tx);white-space:pre;pointer-events:none}
+.cursor{position:absolute;z-index:2;animation:cur1 13s ease-in-out infinite alternate;filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}
+.cursor svg{width:15px;height:15px}
+.cursor .tag{font-family:var(--mono);font-size:10px;font-weight:700;color:#04120b;padding:2px 8px;border-radius:99px;margin-left:10px;margin-top:-3px;display:inline-block}
+.cu1{left:12%;top:22%}.cu1 .tag{background:var(--mag)}
+.cu2{left:58%;top:56%;animation:cur2 17s ease-in-out infinite alternate}.cu2 .tag{background:var(--cyn)}
+.cu3{left:34%;top:72%;animation:cur3 21s ease-in-out infinite alternate}.cu3 .tag{background:var(--amb)}
+@keyframes cur1{25%{left:44%;top:30%}55%{left:70%;top:20%}80%{left:52%;top:62%}100%{left:20%;top:44%}}
+@keyframes cur2{30%{left:26%;top:36%}60%{left:66%;top:70%}100%{left:80%;top:30%}}
+@keyframes cur3{35%{left:60%;top:40%}70%{left:18%;top:66%}100%{left:44%;top:24%}}
+.collab-note{position:absolute;left:46%;top:14%;z-index:3;font-family:var(--mono);font-size:10.5px;background:rgba(255,77,157,.14);border:1px solid rgba(255,77,157,.45);color:#ffb3d4;padding:5px 11px;border-radius:9px 9px 9px 2px;animation:notepop 14s ease-in-out infinite}
+@keyframes notepop{0%,12%{opacity:0;scale:.7}18%,68%{opacity:1;scale:1}76%,100%{opacity:0;scale:.85}}
+/* ============ scripting ============ */
+#scripting{--acc:var(--mag)}
+.scr-grid{display:grid;grid-template-columns:1fr 1.35fr;gap:56px;align-items:start;margin-top:8px}
+.scr-sticky{position:sticky;top:calc(var(--nav-h) + 32px)}
+.scr-points{list-style:none;margin:26px 0;display:flex;flex-direction:column;gap:14px}
+.scr-points li{display:flex;gap:12px;color:var(--tx2);font-size:14.5px}
+.scr-points li::before{content:"▸";color:var(--mag);flex:none}
+.scr-points b{color:var(--tx);font-weight:600}
+.editor{border:1px solid var(--line2);border-radius:14px;background:linear-gradient(180deg,#100d13,#0b0a0e);overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.45)}
+.ed-tabs{display:flex;align-items:center;border-bottom:1px solid var(--line);padding:0 10px;background:rgba(255,77,157,.03)}
+.ed-tab{font-family:var(--mono);font-size:12px;color:var(--tx3);padding:12px 15px;border-bottom:2px solid transparent;transition:color .2s}
+.ed-tab[aria-pressed="true"]{color:var(--mag);border-bottom-color:var(--mag)}
+.ed-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
+.ed-run{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11.5px;font-weight:700;color:#160410;background:linear-gradient(120deg,var(--mag),#ff8a5c);padding:6px 14px;border-radius:7px;transition:box-shadow .2s,opacity .2s}
+.ed-run:hover{box-shadow:0 4px 16px rgba(255,77,157,.4)}
+.ed-run:disabled{opacity:.5;cursor:wait}
+.ed-copy{color:var(--tx3);padding:6px;border-radius:6px}
+.ed-copy:hover{color:var(--cyn)}
+.ed-code{padding:16px 0;font-size:12.5px;line-height:1.85;overflow-x:auto;counter-reset:ln}
+.ed-code .cl{display:block;padding:0 18px 0 0;white-space:pre;color:var(--tx2)}
+.ed-code .cl::before{counter-increment:ln;content:counter(ln);display:inline-block;width:44px;text-align:right;margin-right:18px;color:#4a4250;font-size:11px}
+.ed-code .kw{color:var(--mag)}.ed-code .fn{color:var(--cyn)}.ed-code .st{color:var(--amb)}.ed-code .cm{color:#5c5364;font-style:italic}.ed-code .nu{color:#7ddba8}
+.ed-out{border-top:1px solid var(--line);background:#08070a;min-height:150px;max-height:190px;overflow-y:auto;padding:12px 18px;font-family:var(--mono);font-size:11.5px;line-height:1.9}
+.ed-out .log .msg{color:var(--tx2)}
+.ed-status{display:flex;align-items:center;gap:9px;padding:7px 18px;border-top:1px solid var(--line);font-family:var(--mono);font-size:10.5px;color:var(--tx3)}
+/* ============ benchmarks ============ */
+#benchmarks{--acc:var(--amb)}
+.bench-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;flex-wrap:wrap}
+.bench-panel{margin-top:44px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,#14110a,#0d0c08);padding:30px 32px}
+.legend{display:flex;gap:20px;flex-wrap:wrap;margin-bottom:26px;font-family:var(--mono);font-size:11.5px;color:var(--tx2)}
+.legend span{display:flex;align-items:center;gap:8px}
+.sw{width:22px;height:11px;border-radius:3px;flex:none}
+.sw-h{background:linear-gradient(90deg,var(--grn2),var(--grn))}
+.sw-g{background:repeating-linear-gradient(135deg,rgba(34,217,238,.95) 0 5px,rgba(34,217,238,.4) 5px 10px)}
+.sw-i{background:radial-gradient(rgba(255,77,157,.95) 1.4px,rgba(255,77,157,.32) 1.5px);background-size:6px 6px;background-color:rgba(255,77,157,.15)}
+.bgroup{margin-bottom:26px}
+.bg-head{display:flex;align-items:baseline;gap:12px;font-family:var(--mono);margin-bottom:10px}
+.bg-head b{color:var(--tx);font-size:13.5px;font-weight:500}
+.bg-head span{color:var(--tx3);font-size:11px}
+.brow{display:grid;grid-template-columns:118px minmax(0,1fr) 74px;gap:14px;align-items:center;margin-bottom:7px}
+.brow .bl{font-family:var(--mono);font-size:11px;color:var(--tx3);text-align:right}
+.btrack{height:14px;background:rgba(233,246,239,.05);border-radius:5px;overflow:hidden}
+.bfill{height:100%;width:0;border-radius:5px;transition:width .9s cubic-bezier(.2,.7,.2,1)}
+.bf-h{background:linear-gradient(90deg,var(--grn2),var(--grn));box-shadow:0 0 12px rgba(44,255,143,.35)}
+.bf-g{background:repeating-linear-gradient(135deg,rgba(34,217,238,.95) 0 6px,rgba(34,217,238,.4) 6px 12px)}
+.bf-i{background:radial-gradient(rgba(255,77,157,.95) 1.5px,rgba(255,77,157,.35) 1.6px);background-size:7px 7px;background-color:rgba(255,77,157,.16)}
+.bval{font-family:var(--mono);font-size:11.5px;color:var(--tx);text-align:right}
+.bench-note{font-family:var(--mono);font-size:11px;color:var(--tx3);border-top:1px dashed var(--line);padding-top:16px;line-height:1.9}
+.big-stat{display:inline-flex;align-items:center;gap:10px;font-family:var(--mono);font-size:12.5px;color:var(--amb);border:1px solid rgba(255,178,36,.35);background:rgba(255,178,36,.07);padding:8px 16px;border-radius:99px;margin-top:18px}
+/* ============ voices ============ */
+.voices-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:44px}
+.quote{border:1px solid var(--line);border-radius:16px;padding:26px;background:linear-gradient(180deg,var(--bg2),var(--bg1));display:flex;flex-direction:column;gap:18px;transition:transform .25s,border-color .25s}
+.quote:hover{transform:translateY(-4px);border-color:var(--line2)}
+.quote p{color:var(--tx2);font-size:14.5px;line-height:1.75;flex:1}
+.quote p::before{content:"“";color:var(--grn);font-family:var(--disp);font-size:26px;line-height:0;margin-right:2px}
+.q-who{display:flex;align-items:center;gap:12px}
+.avatar{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;font-family:var(--disp);font-weight:700;font-size:14px;color:#04120b;flex:none}
+.av1{background:linear-gradient(135deg,var(--grn),var(--cyn))}.av2{background:linear-gradient(135deg,var(--amb),var(--mag))}.av3{background:linear-gradient(135deg,var(--cyn),var(--blu))}
+.q-who b{display:block;font-size:13.5px;font-weight:600}
+.q-who span{font-family:var(--mono);font-size:11px;color:var(--tx3)}
+/* ============ pricing ============ */
+#pricing{--acc:var(--grn)}
+.bill-row{display:flex;align-items:center;gap:14px;margin-top:26px}
+.save-chip{font-family:var(--mono);font-size:11px;color:var(--grn);border:1px solid rgba(44,255,143,.35);padding:3px 10px;border-radius:99px;transition:opacity .3s}
+.plans{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:36px;align-items:stretch}
+.plan{position:relative;border:1px solid var(--line);border-radius:18px;padding:30px 28px;background:linear-gradient(180deg,var(--bg2),var(--bg1));display:flex;flex-direction:column;transition:transform .25s,border-color .25s,box-shadow .25s}
+.plan:hover{transform:translateY(-5px)}
+.plan.hot{border-color:rgba(44,255,143,.5);box-shadow:0 20px 60px rgba(44,255,143,.09);background:linear-gradient(180deg,#0f1d15,var(--bg1))}
+.pop{position:absolute;top:-12px;left:50%;translate:-50% 0;font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.1em;color:#04120b;background:linear-gradient(120deg,var(--grn),var(--cyn));padding:4px 14px;border-radius:99px}
+.plan h3{font-size:20px}
+.plan .p-desc{font-size:13px;color:var(--tx3);margin:6px 0 20px}
+.price{display:flex;align-items:baseline;gap:6px;font-family:var(--disp)}
+.price .cur{font-size:20px;color:var(--tx2)}
+.price .num{font-size:46px;font-weight:700;letter-spacing:-.03em}
+.per-note{font-family:var(--mono);font-size:11px;color:var(--tx3);margin:4px 0 22px}
+.plan ul{list-style:none;display:flex;flex-direction:column;gap:11px;margin-bottom:28px;flex:1}
+.plan li{display:flex;gap:10px;font-size:13.5px;color:var(--tx2)}
+.plan li svg{flex:none;width:15px;height:15px;margin-top:3px;stroke:var(--grn)}
+.plan li.dim{color:var(--tx3)}.plan li.dim svg{stroke:var(--tx3)}
+.plan .btn{justify-content:center}
+.price-fine{font-family:var(--mono);font-size:11px;color:var(--tx3);text-align:center;margin-top:26px}
+/* ============ changelog ============ */
+#changelog{--acc:var(--blu)}
+.cl-list{margin-top:44px;position:relative;padding-left:30px}
+.cl-list::before{content:"";position:absolute;left:8px;top:6px;bottom:6px;width:2px;background:linear-gradient(180deg,var(--grn),var(--cyn),var(--mag),transparent)}
+.cl-item{position:relative;padding-bottom:38px}
+.cl-item::before{content:"";position:absolute;left:-27px;top:6px;width:12px;height:12px;border-radius:50%;background:var(--bg0);border:2px solid var(--blu);box-shadow:0 0 10px rgba(77,166,255,.5)}
+.cl-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.cl-ver{font-family:var(--mono);font-weight:700;font-size:15px;color:var(--tx)}
+.cl-name{font-family:var(--disp);font-size:13px;color:var(--cyn)}
+.cl-date{font-family:var(--mono);font-size:11px;color:var(--tx3);margin-left:auto}
+.cl-item ul{list-style:none;display:flex;flex-direction:column;gap:8px}
+.cl-item li{display:flex;gap:10px;align-items:baseline;font-size:13.5px;color:var(--tx2)}
+.tag{font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.08em;padding:2px 8px;border-radius:5px;flex:none;text-transform:uppercase}
+.t-feat{color:var(--grn);background:rgba(44,255,143,.12)}
+.t-perf{color:var(--cyn);background:rgba(34,217,238,.12)}
+.t-fix{color:var(--amb);background:rgba(255,178,36,.12)}
+.t-sec{color:var(--red);background:rgba(255,92,92,.12)}
+.t-api{color:var(--mag);background:rgba(255,77,157,.12)}
+/* ============ faq ============ */
+#faq{--acc:var(--cyn)}
+.faq-grid{display:grid;grid-template-columns:1fr 1.6fr;gap:56px;align-items:start}
+.faq-list{display:flex;flex-direction:column;gap:12px}
+.faq-item{border:1px solid var(--line);border-radius:13px;background:var(--bg1);overflow:hidden;transition:border-color .25s}
+.faq-item.open{border-color:rgba(34,217,238,.4)}
+.faq-q{display:flex;align-items:center;gap:14px;width:100%;text-align:left;padding:18px 20px;font-family:var(--disp);font-weight:600;font-size:15.5px;transition:color .2s}
+.faq-q:hover{color:var(--cyn)}
+.faq-q .chev{margin-left:auto;flex:none;width:16px;height:16px;stroke:var(--tx3);transition:rotate .3s}
+.faq-item.open .chev{rotate:180deg;stroke:var(--cyn)}
+.faq-a{display:grid;grid-template-rows:0fr;transition:grid-template-rows .4s cubic-bezier(.2,.7,.2,1)}
+.faq-item.open .faq-a{grid-template-rows:1fr}
+.faq-a>div{overflow:hidden}
+.faq-a p{padding:0 20px 20px;color:var(--tx2);font-size:14px;line-height:1.75}
+.faq-a code{color:var(--amb);font-size:12.5px}
+/* ============ download ============ */
+#download{--acc:var(--grn);padding-bottom:130px}
+.dl-hero{text-align:center;max-width:720px;margin:0 auto}
+.dl-hero .eyebrow{justify-content:center}
+.dl-hero .eyebrow::after{content:"";width:26px;height:1px;background:var(--acc)}
+.dl-hero h2{font-size:clamp(34px,5vw,60px)}
+.dl-hero .lede{margin:16px auto 0;color:var(--tx2)}
+.dl-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:52px}
+.dl-card{position:relative;border:1px solid var(--line);border-radius:16px;padding:28px 26px;background:linear-gradient(180deg,var(--bg2),var(--bg1));transition:transform .25s,border-color .25s,box-shadow .25s}
+.dl-card:hover{transform:translateY(-4px);border-color:var(--line2)}
+.dl-card.rec{border-color:rgba(44,255,143,.5);box-shadow:0 16px 50px rgba(44,255,143,.08)}
+.rec-chip{display:none;position:absolute;top:-11px;right:20px;font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.08em;color:#04120b;background:var(--grn);padding:3px 11px;border-radius:99px}
+.dl-card.rec .rec-chip{display:block}
+.dl-os{display:flex;align-items:center;gap:13px;margin-bottom:6px}
+.dl-os svg{width:26px;height:26px;fill:var(--tx)}
+.dl-os h3{font-size:18px}
+.dl-meta{font-family:var(--mono);font-size:11px;color:var(--tx3);margin-bottom:18px}
+.dl-cmd{display:flex;align-items:center;gap:8px;background:var(--bg0);border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-family:var(--mono);font-size:11px;color:var(--grn);margin-bottom:14px;overflow:hidden}
+.dl-cmd code{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+.icon-copy{flex:none;color:var(--tx3);padding:3px;border-radius:5px;transition:color .2s}
+.icon-copy:hover{color:var(--cyn)}
+.dl-card .btn{width:100%;justify-content:center;margin-bottom:14px}
+.dl-sum{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10px;color:var(--tx3)}
+.dl-sum code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.dl-fine{text-align:center;font-family:var(--mono);font-size:11.5px;color:var(--tx3);margin-top:34px;line-height:2}
+.dl-fine b{color:var(--tx2);font-weight:500}
+/* ============ footer ============ */
+footer{border-top:1px solid var(--line);background:rgba(6,10,9,.8);padding:64px 0 34px;position:relative}
+.ft-grid{display:grid;grid-template-columns:1.6fr 1fr 1fr 1.4fr;gap:44px}
+.ft-brand p{color:var(--tx3);font-size:13px;margin:14px 0 20px;max-width:280px}
+.status-chip{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--grn);border:1px solid rgba(44,255,143,.3);padding:6px 13px;border-radius:99px}
+.ft-col h4{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:var(--tx3);margin-bottom:16px}
+.ft-col ul{list-style:none;display:flex;flex-direction:column;gap:10px}
+.ft-col a,.ft-col button{font-size:13.5px;color:var(--tx2);transition:color .2s;text-align:left;padding:0}
+.ft-col a:hover,.ft-col button:hover{color:var(--grn)}
+.news-p{font-size:13px;color:var(--tx2);margin-bottom:14px}
+.news-form{display:flex;gap:8px}
+.news-form input{flex:1;min-width:0;background:var(--bg1);border:1px solid var(--line2);border-radius:9px;padding:10px 13px;font-size:13px;color:var(--tx)}
+.news-form input:focus{outline:none;border-color:var(--grn)}
+.news-err{font-family:var(--mono);font-size:11px;color:var(--red);margin-top:8px;display:none}
+.news-ok{display:none;align-items:center;gap:9px;font-size:13px;color:var(--grn)}
+.ft-bottom{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:56px;padding-top:24px;border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--tx3)}
+.ft-bottom .cmdk{margin-left:auto}
+/* ============ palette ============ */
+.overlay{position:fixed;inset:0;z-index:1000;display:none;align-items:flex-start;justify-content:center;padding:14vh 20px 20px;background:rgba(3,6,5,.7);backdrop-filter:blur(8px)}
+.overlay.open{display:flex}
+.pal{width:min(600px,100%);border:1px solid var(--line2);border-radius:16px;background:linear-gradient(180deg,#0e1714,#0a100e);box-shadow:0 40px 120px rgba(0,0,0,.7),0 0 60px rgba(44,255,143,.07);overflow:hidden;animation:palin .25s cubic-bezier(.2,1.2,.4,1)}
+@keyframes palin{from{translate:0 -14px;opacity:0}}
+.pal-in{display:flex;align-items:center;gap:12px;padding:16px 18px;border-bottom:1px solid var(--line)}
+.pal-in svg{width:17px;height:17px;stroke:var(--grn);flex:none}
+.pal-in input{flex:1;background:none;border:0;font-family:var(--mono);font-size:15px;color:var(--tx)}
+.pal-in input:focus{outline:none}
+.pal-in input::placeholder{color:var(--tx3)}
+.pal-list{max-height:330px;overflow-y:auto;padding:8px}
+.pal-group{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--tx3);padding:10px 12px 5px}
+.pal-item{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:10px 12px;border-radius:9px;font-size:14px;color:var(--tx2);transition:background .1s}
+.pal-item .pi-ic{flex:none;width:15px;height:15px;stroke:var(--tx3)}
+.pal-item.sel{background:rgba(44,255,143,.1);color:var(--tx)}
+.pal-item.sel .pi-ic{stroke:var(--grn)}
+.pal-item mark{background:none;color:var(--grn);font-weight:700}
+.pal-item .pi-k{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--tx3)}
+.pal-empty{padding:26px;text-align:center;font-family:var(--mono);font-size:12.5px;color:var(--tx3)}
+.pal-foot{display:flex;gap:18px;padding:10px 18px;border-top:1px solid var(--line);font-family:var(--mono);font-size:10.5px;color:var(--tx3)}
+.pal-foot kbd{background:var(--bg3);padding:1px 6px;border-radius:4px;border:1px solid var(--line)}
+/* ============ modal ============ */
+.modal{width:min(460px,100%);border:1px solid var(--line2);border-radius:18px;background:linear-gradient(180deg,#0f1a15,#0a100e);box-shadow:0 40px 120px rgba(0,0,0,.7);padding:34px 32px;position:relative;animation:palin .3s cubic-bezier(.2,1.2,.4,1)}
+.modal::before,.modal::after{content:"";position:absolute;width:16px;height:16px;border:2px solid var(--grn);opacity:.6}
+.modal::before{top:-2px;left:-2px;border-right:0;border-bottom:0;border-radius:6px 0 0 0}
+.modal::after{bottom:-2px;right:-2px;border-left:0;border-top:0;border-radius:0 0 6px 0}
+.modal-x{position:absolute;top:14px;right:14px;width:32px;height:32px;display:grid;place-items:center;border-radius:8px;color:var(--tx3)}
+.modal-x:hover{color:var(--tx);background:rgba(140,255,200,.08)}
+.modal h3{font-size:23px;margin-bottom:8px}
+.modal .m-sub{font-size:13.5px;color:var(--tx2);margin-bottom:22px}
+.modal .m-sub b{color:var(--grn);font-weight:600}
+.m-field{display:flex;flex-direction:column;gap:7px;margin-bottom:16px}
+.m-field label{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--tx3)}
+.m-field input{background:var(--bg0);border:1px solid var(--line2);border-radius:10px;padding:12px 15px;font-size:14.5px;color:var(--tx);transition:border-color .2s}
+.m-field input:focus{outline:none;border-color:var(--grn);box-shadow:0 0 0 3px rgba(44,255,143,.12)}
+.m-err{display:none;font-family:var(--mono);font-size:11.5px;color:var(--red);margin-bottom:14px}
+.m-err.show{display:block;animation:shake .4s}
+@keyframes shake{20%,60%{translate:-5px 0}40%,80%{translate:5px 0}}
+.modal .btn{width:100%;justify-content:center}
+.m-fine{font-family:var(--mono);font-size:10.5px;color:var(--tx3);text-align:center;margin-top:16px;line-height:1.8}
+.spinner{width:15px;height:15px;border:2px solid rgba(4,18,11,.3);border-top-color:#04120b;border-radius:50%;animation:spin .7s linear infinite;display:none}
+@keyframes spin{to{rotate:360deg}}
+.btn.loading .spinner{display:block}
+.btn.loading .btn-txt{opacity:.6}
+.m-success{display:none;text-align:center}
+.m-success.show{display:block}
+.check-ring{width:66px;height:66px;margin:6px auto 18px}
+.check-ring circle{fill:none;stroke:var(--grn);stroke-width:2.5;stroke-dasharray:200;stroke-dashoffset:200;animation:draw .7s .1s forwards}
+.check-ring path{fill:none;stroke:var(--grn);stroke-width:3;stroke-linecap:round;stroke-dasharray:40;stroke-dashoffset:40;animation:draw .5s .6s forwards}
+.m-success h4{font-size:19px;margin-bottom:8px}
+.m-success p{font-size:13px;color:var(--tx2);margin-bottom:18px}
+.key-out{display:flex;align-items:center;gap:10px;background:var(--bg0);border:1px solid rgba(44,255,143,.35);border-radius:10px;padding:12px 15px;font-family:var(--mono);font-size:13.5px;color:var(--grn);margin-bottom:18px}
+.key-out code{flex:1;text-align:left;letter-spacing:.04em}
+/* ============ toasts ============ */
+.toasts{position:fixed;bottom:22px;right:22px;z-index:1200;display:flex;flex-direction:column;gap:10px;pointer-events:none}
+.toast{display:flex;align-items:center;gap:11px;background:linear-gradient(180deg,#101b16,#0b120f);border:1px solid var(--line2);border-radius:12px;padding:12px 17px;font-size:13.5px;box-shadow:0 14px 44px rgba(0,0,0,.55);opacity:0;translate:16px 0;transition:opacity .3s,translate .3s;max-width:min(360px,86vw)}
+.toast.on{opacity:1;translate:0 0}
+.toast svg{width:17px;height:17px;flex:none}
+.toast.ok svg{stroke:var(--grn)}.toast.info svg{stroke:var(--cyn)}.toast.err svg{stroke:var(--red)}
+.toast.ok{border-color:rgba(44,255,143,.4)}.toast.err{border-color:rgba(255,92,92,.4)}
+/* ============ responsive ============ */
+@media(max-width:1120px){
+  .wb-grid{grid-template-columns:168px minmax(0,1fr) 290px}
+  .insn{grid-template-columns:74px 140px minmax(0,1fr)}
+  .nav-links{display:none}
+  .menu-btn{display:grid}
+}
+@media(max-width:1020px){
+  .hero-grid{grid-template-columns:1fr;gap:32px}
+  .stats{max-width:460px}
+  .bento{grid-template-columns:repeat(2,1fr)}
+  .b-a,.b-f{grid-column:span 2}.b-b,.b-c,.b-d,.b-e{grid-column:span 1}
+  .scr-grid,.faq-grid{grid-template-columns:1fr;gap:36px}
+  .scr-sticky{position:static}
+  .voices-grid,.plans,.dl-cards{grid-template-columns:1fr;max-width:520px;margin-left:auto;margin-right:auto}
+  .voices-grid{margin-top:44px}.plans{margin-top:36px}.dl-cards{margin-top:52px}
+  .ft-grid{grid-template-columns:1fr 1fr}
+}
+@media(max-width:880px){
+  .wb-grid{display:flex;flex-direction:column}
+  .wb-side{flex-direction:row;flex-wrap:wrap;align-items:center;border-right:0;border-bottom:1px solid var(--line);padding:10px 12px;gap:6px}
+  .side-lbl,.side-meta{display:none}
+  .fn-item{width:auto;border:1px solid var(--line);border-left-width:1px;padding:5px 11px;border-radius:99px;font-size:11px}
+  .fn-item.on{border-color:var(--grn)}
+  .fn-item small{display:none}
+  .pane-tabs{display:flex}
+  .pane-dis,.pane-dec,.pane-hex,.pane-con{display:none;max-height:300px;border-right:0}
+  .wb[data-pane="dis"] .pane-dis{display:block}
+  .wb[data-pane="dec"] .pane-dec{display:block}
+  .wb[data-pane="hex"] .pane-hex{display:block}
+  .wb[data-pane="hex"] .pane-con{display:none}
+  .wb[data-pane="hex"][data-btab="con"] .pane-hex{display:none}
+  .wb[data-pane="hex"][data-btab="con"] .pane-con{display:block}
+  .pane-reg{border-top:1px solid var(--line)}
+  .pane-reg .reg-wrap{display:flex;flex-wrap:wrap;gap:0 18px;padding:0 6px}
+  .reg-row{gap:10px}
+  .key-field{margin-left:0;width:100%}
+  .key-field input{flex:1;width:auto}
+  .sec{padding:80px 0}
+}
+@media(max-width:600px){
+  .wrap{padding:0 18px}
+  .insn{grid-template-columns:72px minmax(0,1fr)}
+  .insn .by{display:none}
+  .bento{grid-template-columns:1fr}
+  .b-a,.b-b,.b-c,.b-d,.b-e,.b-f{grid-column:span 1}
+  .cmdk span{display:none}
+  .hero{padding-top:calc(var(--nav-h) + 40px)}
+  .cta-row .btn{flex:1;justify-content:center}
+  .bench-panel{padding:22px 18px}
+  .brow{grid-template-columns:86px minmax(0,1fr) 62px;gap:9px}
+  .ft-grid{grid-template-columns:1fr}
+  .hex-asc{display:none}
+  .cl-date{margin-left:0;width:100%}
+  .toasts{left:18px;right:18px;align-items:stretch}
+}
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation-duration:.001s!important;animation-iteration-count:1!important;transition-duration:.001s!important}
+  .js .rv{opacity:1;translate:none}
+  .mq-track{animation:none}
+  .spark polyline{stroke-dashoffset:0}
+}
+</style>
+</head>
+<body>
+<div class="aurora" aria-hidden="true"><i class="a1"></i><i class="a2"></i><i class="a3"></i></div>
+<div class="grain" aria-hidden="true"></div>
 
+<!-- ================= NAV ================= -->
+<header class="nav" id="nav">
+  <div class="progress" id="progressBar"></div>
+  <div class="wrap">
+    <a class="logo" href="#top" aria-label="Hexlight home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lgHex" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2cff8f"/><stop offset="1" stop-color="#22d9ee"/></linearGradient></defs><path d="M16 2 28 9v14L16 30 4 23V9z" fill="none" stroke="url(#lgHex)" stroke-width="2.2"/><path class="beam" d="M6 16h9" stroke="#e9f6ef" stroke-width="1.8"/><path d="M15 16l9-6" stroke="#2cff8f" stroke-width="1.8"/><path d="M15 16h10" stroke="#22d9ee" stroke-width="1.8"/><path d="M15 16l9 6" stroke="#ff4d9d" stroke-width="1.8"/></svg>
+      hexlight
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a class="nav-link" data-sec="workbench" href="#workbench">Workbench</a>
+      <a class="nav-link" data-sec="features" href="#features">Features</a>
+      <a class="nav-link" data-sec="scripting" href="#scripting">Scripting</a>
+      <a class="nav-link" data-sec="benchmarks" href="#benchmarks">Benchmarks</a>
+      <a class="nav-link" data-sec="pricing" href="#pricing">Pricing</a>
+      <a class="nav-link" data-sec="changelog" href="#changelog">Changelog</a>
+    </nav>
+    <div class="nav-right">
+      <button class="cmdk" id="cmdkBtn" aria-label="Open command palette"><span>Search</span><kbd>Ctrl K</kbd></button>
+      <a class="btn btn-p btn-sm" href="#download">Download</a>
+      <button class="menu-btn" id="menuBtn" aria-expanded="false" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+    </div>
+  </div>
+</header>
+<div class="mobile-menu" id="mobileMenu">
+  <nav aria-label="Mobile">
+    <a class="nav-link" href="#workbench">Workbench</a>
+    <a class="nav-link" href="#features">Features</a>
+    <a class="nav-link" href="#scripting">Scripting</a>
+    <a class="nav-link" href="#benchmarks">Benchmarks</a>
+    <a class="nav-link" href="#pricing">Pricing</a>
+    <a class="nav-link" href="#changelog">Changelog</a>
+    <a class="nav-link" href="#faq">FAQ</a>
+    <a class="btn btn-p" href="#download">Download free</a>
+  </nav>
+</div>
+
+<main id="top">
+<!-- ================= HERO ================= -->
+<section class="hero" id="hero">
+  <canvas id="bgCanvas" aria-hidden="true"></canvas>
+  <div class="wrap">
+    <div class="hero-grid">
+      <div>
+        <span class="chip badge rv"><i class="dot"></i>v1.4.2 “Prism” · shipped Nov 12, 2026</span>
+        <h1 class="rv" style="--d:.08s">Read binaries<br>like <span class="grad">source code.</span></h1>
+        <p class="sub rv" style="--d:.16s">Hexlight is a reverse-engineering workbench for people who ship: a fast disassembler, a decompiler that names things the way you would, and a time-travel debugger — one canvas, thirty-seven architectures, zero ceremony.</p>
+        <div class="cta-row rv" style="--d:.24s">
+          <a class="btn btn-p" href="#download"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 3v12m0 0 5-5m-5 5-5-5M4 21h16"/></svg>Download free</a>
+          <button class="btn btn-s" id="watchTraceBtn"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>Run a live trace</button>
+        </div>
+        <p class="hero-meta rv" style="--d:.3s"><b>Windows · Linux · macOS</b> — 14 MB · no account · no telemetry</p>
+      </div>
+      <div class="stats rv" style="--d:.34s" id="statsPar">
+        <div class="stats-head">$ hexlight <b>--stats</b></div>
+        <div class="stat-row"><span class="stat-num"><span data-count="37">0</span></span><span class="stat-lbl">architectures<small>x86 → RISC-V → 6502</small></span></div>
+        <div class="stat-row"><span class="stat-num"><span data-count="0.4" data-dec="1">0</span><em> s</em></span><span class="stat-lbl">cold start<small>to first decompilation</small></span></div>
+        <div class="stat-row"><span class="stat-num"><span data-count="94">0</span><em> %</em></span><span class="stat-lbl">type recovery<small>public corpus, 2,140 fns</small></span></div>
+        <svg class="spark" viewBox="0 0 220 34" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="sparkGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2cff8f"/><stop offset=".6" stop-color="#22d9ee"/><stop offset="1" stop-color="#ff4d9d"/></linearGradient></defs><polyline points="0,28 18,26 36,27 54,22 72,23 90,17 108,19 126,12 144,14 162,8 180,10 198,4 220,6"/></svg>
+      </div>
+    </div>
+
+    <!-- ============ LIVE WORKBENCH ============ -->
+    <div class="wb-wrap rv" style="--d:.42s" id="workbench">
+      <div class="wb-par" id="wbPar">
+        <div class="wb" id="wb" data-pane="dis" data-btab="hex">
+          <div class="wb-burst" id="burst" aria-hidden="true"></div>
+          <div class="wb-title">
+            <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="wb-file"><b>crackme.elf</b> — hexlight workbench</span>
+            <span class="wb-arch">ELF64 · x86-64 · little-endian</span>
+            <span class="crack-badge">🔓 CRACKED</span>
+          </div>
+          <div class="wb-tools">
+            <button class="tbtn primary" id="traceBtn">▶ Trace</button>
+            <button class="tbtn" id="stepBtn" title="Single step">⏭ Step</button>
+            <button class="tbtn" id="resetBtn" title="Reset machine state">↺ Reset</button>
+            <button class="tbtn" id="dataChip" aria-pressed="false" title="Inspect the expected-byte table">g_expected @ 0x402000</button>
+            <button class="tbtn" id="hintBtn" aria-pressed="false" title="Hint">?</button>
+            <label class="key-field">key: <input id="keyInput" maxlength="16" spellcheck="false" autocomplete="off" value="WRONG-KEY-000000" aria-label="License key to test (16 characters)"></label>
+          </div>
+          <div class="hint-bar" id="hintBar">the gate is <code>key[i] ^ 0x2a == g_expected[i]</code> — open <code>g_expected</code> above and XOR each byte back. 16 chars. or read the pseudo-C, it's all there.</div>
+          <div class="pane-tabs" id="paneTabs">
+            <button class="tbtn" data-pane="dis" aria-pressed="true">Disassembly</button>
+            <button class="tbtn" data-pane="dec" aria-pressed="false">Pseudo-C</button>
+            <button class="tbtn" data-pane="hex" aria-pressed="false">Hex / Log</button>
+          </div>
+          <div class="wb-grid">
+            <aside class="wb-side">
+              <div class="side-lbl">Functions</div>
+              <div id="fnList"></div>
+              <div class="side-lbl">Symbols</div>
+              <button class="fn-item sym" data-sym="expected"><span class="fx">◆</span>g_expected<small>16 B</small></button>
+              <button class="fn-item sym" data-sym="buf"><span class="fx">◆</span>g_buf<small>.bss</small></button>
+              <div class="side-meta"><b>crackme.elf</b><br>6 functions · 83 B gate<br>.text .rodata .bss<br>analysis: 0.03 s</div>
+            </aside>
+            <div class="pane pane-dis" id="disPane">
+              <div class="pane-head"><b id="disName">check_license</b><span id="disAddr">0x4011a0</span><button class="xref" id="xrefChip" hidden>← main+0x1c</button></div>
+              <div id="disRows"></div>
+            </div>
+            <div class="pane pane-dec" id="decPane">
+              <div class="pane-head"><b>pseudo-C</b><span>recovered · 94% conf</span></div>
+              <div id="decRows"></div>
+            </div>
+            <div class="pane pane-hex" id="hexPane">
+              <div class="pane-head"><b id="hexLabel">check_license · .text</b>
+                <span class="bottom-tabs"><button class="btab" id="hexTab" aria-pressed="true">hex</button><button class="btab" id="conTab" aria-pressed="false">console</button></span>
+              </div>
+              <div id="hexRows"></div>
+            </div>
+            <div class="pane pane-con" id="conPane">
+              <div class="pane-head"><b>console</b><span>trace log</span>
+                <span class="bottom-tabs"><button class="btab" id="hexTab2" aria-pressed="false">hex</button><button class="btab" id="conTab2" aria-pressed="true">console</button></span>
+              </div>
+              <div id="conRows"></div>
+            </div>
+            <div class="pane pane-reg">
+              <div class="pane-head"><b>registers</b><span>x86-64</span></div>
+              <div class="reg-wrap">
+                <div class="reg-row"><span class="rn">rip</span><span class="rval" data-reg="rip">0x00000000004011a0</span></div>
+                <div class="reg-row"><span class="rn">rax</span><span class="rval" data-reg="rax">0x0000000000000000</span></div>
+                <div class="reg-row"><span class="rn">rcx</span><span class="rval" data-reg="rcx">0x0000000000000000</span></div>
+                <div class="reg-row"><span class="rn">rdx</span><span class="rval" data-reg="rdx">0x0000000000000000</span></div>
+                <div class="reg-row"><span class="rn">var_i</span><span class="rval" data-reg="i">0x00000000</span></div>
+              </div>
+              <div class="flags"><span class="flag" id="flagZ">ZF</span><span class="flag" id="flagS">SF</span><span class="flag on" id="flagI">IF</span></div>
+            </div>
+          </div>
+          <div class="wb-status"><span class="led" id="statusLed"></span><span id="statusText">idle — ready to trace</span><span id="statusMsg">press ▶ to execute check_license against your key</span></div>
+        </div>
+      </div>
+      <p class="wb-caption"><i class="dot" style="background:var(--amb);box-shadow:0 0 10px var(--amb)"></i>Interactive demo — a real crackme, traced instruction-by-instruction in your browser. <b>Find the 16-character key.</b></p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= MARQUEE ================= -->
+<div class="mq" aria-hidden="true">
+  <div class="mq-track" id="mqTrack">
+    <div class="mq-group">
+      <span><i style="background:var(--grn)"></i>x86-64</span><span><i style="background:var(--cyn)"></i>ARM64</span><span><i style="background:var(--mag)"></i>RISC-V</span><span><i style="background:var(--amb)"></i>MIPS</span><span><i style="background:var(--blu)"></i>PowerPC</span><span><i style="background:var(--grn)"></i>WASM</span><span><i style="background:var(--cyn)"></i>AVR</span><span><i style="background:var(--mag)"></i>6502</span><span><i style="background:var(--amb)"></i>TriCore</span><span><i style="background:var(--blu)"></i>SPARC</span><span><i style="background:var(--grn)"></i>ELF</span><span><i style="background:var(--cyn)"></i>PE</span><span><i style="background:var(--mag)"></i>Mach-O</span><span><i style="background:var(--amb)"></i>DEX</span>
+    </div>
+    <div class="mq-group">
+      <span><i style="background:var(--grn)"></i>x86-64</span><span><i style="background:var(--cyn)"></i>ARM64</span><span><i style="background:var(--mag)"></i>RISC-V</span><span><i style="background:var(--amb)"></i>MIPS</span><span><i style="background:var(--blu)"></i>PowerPC</span><span><i style="background:var(--grn)"></i>WASM</span><span><i style="background:var(--cyn)"></i>AVR</span><span><i style="background:var(--mag)"></i>6502</span><span><i style="background:var(--amb)"></i>TriCore</span><span><i style="background:var(--blu)"></i>SPARC</span><span><i style="background:var(--grn)"></i>ELF</span><span><i style="background:var(--cyn)"></i>PE</span><span><i style="background:var(--mag)"></i>Mach-O</span><span><i style="background:var(--amb)"></i>DEX</span>
+    </div>
+  </div>
+</div>
+
+<!-- ================= FEATURES ================= -->
+<section class="sec" id="features">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <div class="eyebrow">// 01 — capabilities</div>
+      <h2>Everything between you<br>and <span class="grad">the truth.</span></h2>
+      <p class="lede">One window from raw bytes to named, typed, debuggable logic. Every panel below is live — poke at it.</p>
+    </div>
+    <div class="bento">
+      <article class="card spot b-a rv">
+        <span class="kicker">decompiler</span>
+        <h3>A decompiler with taste</h3>
+        <p class="cp">Types recovered from dataflow, names proposed from xrefs and string context. Toggle the difference on the same function you just traced upstairs.</p>
+        <div class="seg" role="group" aria-label="Decompiler output mode">
+          <button id="segRaw" aria-pressed="true">generic output</button>
+          <button id="segOpt" aria-pressed="false">hexlight</button>
+        </div>
+        <pre class="snippet on" id="snipRaw"><span class="ty">__int64</span> __fastcall <span class="fn">sub_4011A0</span>(<span class="ty">__int64</span> a1)
+{
+  <span class="ty">unsigned int</span> v2; <span class="cm">// eax</span>
+  <span class="ty">int</span> v3;          <span class="cm">// [rbp-4h]</span>
+  <span class="kw">if</span> (strlen(a1) != <span class="nm">16</span>) <span class="kw">return</span> <span class="nm">0</span>;
+  <span class="kw">for</span> (v3 = <span class="nm">0</span>; v3 &lt; <span class="nm">16</span>; ++v3) {
+    v2 = *(<span class="ty">_BYTE</span> *)(a1 + v3) ^ <span class="nm">0x2A</span>;
+    <span class="kw">if</span> (v2 != <span class="nm">byte_402000</span>[v3]) <span class="kw">return</span> <span class="nm">0</span>;
+  }
+  <span class="kw">return</span> <span class="nm">1</span>;
+}</pre>
+        <pre class="snippet" id="snipOpt"><span class="ty">int32_t</span> <span class="fn">check_license</span>(<span class="kw">const</span> <span class="ty">char</span>* key)
+{
+  <span class="kw">if</span> (strlen(key) != <span class="nm">KEY_LEN</span>)      <span class="cm">// KEY_LEN = 16, from cmp</span>
+    <span class="kw">return</span> <span class="nm">0</span>;
+  <span class="kw">for</span> (<span class="ty">int32_t</span> i = <span class="nm">0</span>; i &lt; <span class="nm">KEY_LEN</span>; i++)
+    <span class="kw">if</span> ((key[i] ^ <span class="nm">XOR_KEY</span>) != g_expected[i])
+      <span class="kw">return</span> <span class="nm">0</span>;                  <span class="cm">// XOR_KEY = 0x2a, from loop</span>
+  <span class="kw">return</span> <span class="nm">1</span>;
+}</pre>
+        <div class="conf-row"><span class="chip"><i class="dot"></i>94% types recovered</span><span class="chip">names from xrefs + strings</span><span class="chip">one keystroke to override</span></div>
+      </article>
+      <article class="card spot b-b rv" style="--d:.08s">
+        <span class="kicker">coverage</span>
+        <h3>37 architectures</h3>
+        <p class="cp">From AVR bootloaders to ARM64 firmware — one UI, one script API.</p>
+        <div class="arch-cloud">
+          <span class="arch-chip hot" style="--bd:0s">x86-64</span><span class="arch-chip hot" style="--bd:.4s">ARM64</span><span class="arch-chip" style="--bd:.8s">RISC-V</span><span class="arch-chip" style="--bd:1.2s">MIPS</span><span class="arch-chip" style="--bd:.2s">PPC</span><span class="arch-chip" style="--bd:.6s">WASM</span><span class="arch-chip" style="--bd:1s">AVR</span><span class="arch-chip" style="--bd:1.4s">6502</span><span class="arch-chip" style="--bd:.3s">+29 more</span>
+        </div>
+        <div class="fmt-row"><span>ELF</span><span>PE</span><span>Mach-O</span><span>DEX</span><span>COFF</span><span>raw</span></div>
+      </article>
+      <article class="card spot b-c rv">
+        <span class="kicker">debugger</span>
+        <h3>Time-travel debugging</h3>
+        <p class="cp">Scrub execution like video. Every register, every flag — reversible.</p>
+        <div class="scrub-out">
+          <div class="so-step" id="scrubStep">snapshot 1 / 8</div>
+          <div class="so-rip" id="scrubRip">rip 0x4011a0</div>
+          <div class="so-in" id="scrubInsn">push rbp</div>
+          <div class="so-rax" id="scrubRax">rax = 0x0</div>
+        </div>
+        <input type="range" id="scrub" min="0" max="7" value="0" step="1" aria-label="Scrub execution timeline">
+      </article>
+      <article class="card spot b-d rv" style="--d:.08s">
+        <span class="kicker">navigation</span>
+        <h3>Graphs that stay legible</h3>
+        <p class="cp">Xrefs and calls at any zoom. Hover a node to isolate its neighborhood.</p>
+        <svg class="cg" id="cg" viewBox="0 0 320 190" role="img" aria-label="Call graph of the crackme">
+          <path class="edge e-main e-check" d="M85 42 C 120 42, 120 88, 152 88"/>
+          <path class="edge e-check e-strlen" d="M212 82 C 240 70, 240 48, 258 42"/>
+          <path class="edge e-check e-fail" d="M172 100 C 150 120, 130 132, 118 148"/>
+          <path class="edge e-check e-ok" d="M200 100 C 216 120, 226 132, 236 148"/>
+          <path class="edge e-main" d="M70 52 C 60 100, 150 160, 262 122"/>
+          <g class="cg-node" data-n="main"><rect x="30" y="28" width="58" height="24" rx="7"/><text x="59" y="44" text-anchor="middle">main</text></g>
+          <g class="cg-node" data-n="check"><rect x="152" y="76" width="90" height="24" rx="7" style="stroke:rgba(44,255,143,.5)"/><text x="197" y="92" text-anchor="middle" style="fill:var(--grn)">check_license</text></g>
+          <g class="cg-node" data-n="strlen"><rect x="256" y="28" width="56" height="24" rx="7"/><text x="284" y="44" text-anchor="middle" style="fill:var(--amb)">strlen</text></g>
+          <g class="cg-node" data-n="fail"><rect x="86" y="148" width="64" height="24" rx="7"/><text x="118" y="164" text-anchor="middle" style="fill:var(--red)">reject</text></g>
+          <g class="cg-node" data-n="ok"><rect x="212" y="148" width="64" height="24" rx="7"/><text x="244" y="164" text-anchor="middle" style="fill:var(--grn)">accept</text></g>
+          <g class="cg-node" data-n="main"><rect x="262" y="110" width="50" height="24" rx="7"/><text x="287" y="126" text-anchor="middle" style="fill:var(--amb)">puts</text></g>
+        </svg>
+        <div class="cg-cap">live xref graph · hover to isolate</div>
+      </article>
+      <article class="card spot b-e rv" style="--d:.16s">
+        <span class="kicker">automation</span>
+        <h3>Scriptable to the core</h3>
+        <p class="cp">Every UI action is a Python call. If you can click it, you can automate it.</p>
+        <pre class="mini-code"><span style="color:var(--mag)">for</span> fn <span style="color:var(--mag)">in</span> doc.functions:
+  <span style="color:var(--mag)">if</span> fn.has_const(<span style="color:var(--amb)">0x2a</span>):
+    fn.rename(<span style="color:var(--amb)">"xor_gate"</span>)</pre>
+        <a class="arrow-link" href="#scripting">Open the scripting tour <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></a>
+      </article>
+      <article class="card spot b-f rv">
+        <span class="kicker">studio</span>
+        <h3>Reversing is a team sport</h3>
+        <p class="cp">Shared cursors, shared symbols, zero merge conflicts. Your whole lab inside one binary — CRDT-synced, self-hostable.</p>
+        <div class="collab-stage" aria-hidden="true">
+          <div class="collab-code">int32_t check_license(const char* key) {
+  if (strlen(key) != KEY_LEN) return 0;
+  for (int32_t i = 0; i &lt; KEY_LEN; i++)
+    if ((key[i] ^ XOR_KEY) != g_expected[i]) return 0;
+  return 1;
+}</div>
+          <span class="collab-note">vex: this is the gate — renaming ✓</span>
+          <span class="cursor cu1"><svg viewBox="0 0 24 24" fill="#ff4d9d"><path d="M4 2l16 8-7 2-3 7z"/></svg><span class="tag">vex</span></span>
+          <span class="cursor cu2"><svg viewBox="0 0 24 24" fill="#22d9ee"><path d="M4 2l16 8-7 2-3 7z"/></svg><span class="tag">kenji</span></span>
+          <span class="cursor cu3"><svg viewBox="0 0 24 24" fill="#ffb224"><path d="M4 2l16 8-7 2-3 7z"/></svg><span class="tag">ada</span></span>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SCRIPTING ================= -->
+<section class="sec" id="scripting">
+  <div class="wrap">
+    <div class="scr-grid">
+      <div class="scr-sticky rv">
+        <div class="eyebrow">// 02 — scripting</div>
+        <h2 style="font-size:clamp(30px,3.8vw,46px)">If you can click it,<br>you can <span class="grad">script it.</span></h2>
+        <ul class="scr-points">
+          <li><span><b>Python 3.12 embedded.</b> A typed API mirroring every UI action — renames, types, comments, patches, graphs.</span></li>
+          <li><span><b>Hot reload.</b> Save the file, the workbench re-runs it. Iterate at the speed of thought.</span></li>
+          <li><span><b>Headless CI mode.</b> The same scripts triage 400 firmware images overnight, no GUI attached.</span></li>
+          <li><span><b>Emulator built in.</b> Call any function with controlled memory and registers — no device required.</span></li>
+        </ul>
+        <button class="arrow-link" id="emuLink">See the emulator API <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button>
+      </div>
+      <div class="editor rv" style="--d:.1s">
+        <div class="ed-tabs">
+          <button class="ed-tab" data-scr="triage" aria-pressed="true">triage.py</button>
+          <button class="ed-tab" data-scr="emulate" aria-pressed="false">emulate.py</button>
+          <button class="ed-tab" data-scr="sync" aria-pressed="false">sync.py</button>
+          <div class="ed-actions">
+            <button class="ed-copy" id="scrCopy" title="Copy script" aria-label="Copy script"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button>
+            <button class="ed-run" id="scrRun">▶ Run</button>
+          </div>
+        </div>
+        <div class="ed-code" id="scrCode"></div>
+        <div class="ed-out scr-out" id="scrOut" aria-live="polite"></div>
+        <div class="ed-status"><span class="led" id="scrLed"></span><span id="scrStatus">python 3.12 · embedded · ready</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= BENCHMARKS ================= -->
+<section class="sec" id="benchmarks">
+  <div class="wrap">
+    <div class="bench-head rv">
+      <div class="sec-head">
+        <div class="eyebrow">// 03 — performance</div>
+        <h2>Fast enough to<br>keep your <span class="grad">flow.</span></h2>
+        <p class="lede">Time to first decompilation, measured on real-world binaries. Analysis is incremental and parallel across every core you own.</p>
+        <span class="big-stat">⚡ 9.8× median speedup · cold analysis</span>
+      </div>
+      <div class="seg" role="group" aria-label="Benchmark mode">
+        <button class="bmode" data-mode="cold" aria-pressed="true">Cold start</button>
+        <button class="bmode" data-mode="warm" aria-pressed="false">Warm cache</button>
+      </div>
+    </div>
+    <div class="bench-panel rv" style="--d:.1s">
+      <div class="legend"><span><i class="sw sw-h"></i>Hexlight 1.4</span><span><i class="sw sw-g"></i>Disassembler G</span><span><i class="sw sw-i"></i>Suite I</span></div>
+      <div id="benchGroups"></div>
+      <p class="bench-note">Median of 10 runs · Ryzen 9 7950X · 64 GB · NVMe · analysis threads = 32 · lower is better.<br>Competitor names withheld out of politeness. Reproduce with <span style="color:var(--amb)">hexlight bench --suite public</span>.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= VOICES ================= -->
+<section class="sec" id="voices" style="padding-top:0">
+  <div class="wrap">
+    <div class="sec-head rv"><div class="eyebrow" style="--acc:var(--grn)">// field notes</div><h2 style="font-size:clamp(26px,3.2vw,38px)">From the people<br>who live in <span class="grad">the disasm.</span></h2></div>
+    <div class="voices-grid">
+      <article class="quote rv"><p>The type recovery is uncanny. It named a struct field <code style="color:var(--amb)">retry_budget</code> before I did — from a printf format string two functions away.</p><div class="q-who"><span class="avatar av1">ML</span><div><b>Mara Lindqvist</b><span>malware lead · Nordwall CERT</span></div></div></article>
+      <article class="quote rv" style="--d:.08s"><p>I scripted our whole firmware triage in an afternoon. 400 images, headless, in CI. Nothing else comes close to that ergonomics.</p><div class="q-who"><span class="avatar av2">DO</span><div><b>Dele Okafor</b><span>firmware security · independent</span></div></div></article>
+      <article class="quote rv" style="--d:.16s"><p>Two analysts, one binary, zero “who renamed this” arguments. Studio paid for itself in the first week of the engagement.</p><div class="q-who"><span class="avatar av3">RT</span><div><b>Rin Tanaka</b><span>vuln research · Keel Security</span></div></div></article>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PRICING ================= -->
+<section class="sec" id="pricing">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <div class="eyebrow">// 04 — pricing</div>
+      <h2>Priced for <span class="grad">practitioners.</span></h2>
+      <p class="lede">Free core, honest upgrades. No seat minimums, no dark patterns, cancel with one click.</p>
+      <div class="bill-row">
+        <div class="seg" role="group" aria-label="Billing period">
+          <button class="b bill" data-bill="y" aria-pressed="true">Yearly</button>
+          <button class="b bill" data-bill="m" aria-pressed="false">Monthly</button>
+        </div>
+        <span class="save-chip" id="saveChip">save 25%</span>
+      </div>
+    </div>
+    <div class="plans">
+      <article class="plan rv">
+        <h3>Community</h3><p class="p-desc">The full core, MIT-licensed, forever.</p>
+        <div class="price"><span class="cur">$</span><span class="num">0</span></div>
+        <p class="per-note">free forever · no account</p>
+        <ul>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M4 12l5 5L20 6"/></svg>Disassembler + decompiler, x86 &amp; ARM</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M4 12l5 5L20 6"/></svg>Python scripting + headless mode</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M4 12l5 5L20 6"/></svg>Local projects, unlimited binaries</li>
+          <li class="dim"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>Time-travel debugger</li>
+          <li class="dim"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>Realtime collaboration</li>
+        </ul>
+        <a class="btn btn-s" href="#download">Download free</a>
+      </article>
+      <article class="plan hot rv" style="--d:.08s">
+        <span class="pop">MOST POPULAR</span>
+        <h3>Pro</h3><p class="p-desc">Every architecture, every superpower.</p>
+        <div class="price"><span class="cur">$</span><span class="num" data-m="16" data-y="12">12</span></div>
+        <p class="per-note" data-per>/mo · billed yearly · 1 seat</p>
+        <ul>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M4 12l5 5L20 6"/></svg>All 37 architectures + all formats</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M4 12l5 5L20 6"/></svg>Time-travel debugger + emulator</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M4 12l5 5L20 6"/></svg>Advanced type &amp; name recovery</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M4 12l5 5L20 6"/></svg>Priority builds, beta channel</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M4 12l5 5L20 6"/></svg>Everything in Community</li>
+        </ul>
+        <button class="btn btn-p" id="trialProBtn">Start 14-day trial</button>
+      </article>
+      <article class="plan rv" style="--d:.16s">
+        <h3>Studio</h3><p class="p-desc">Your whole lab, one shared canvas.</p>
+        <div class="price"><span class="cur">$</span><span class="num" data-m="49" data-y="39">39</span></div>
+        <p class="per-note" data-per>/seat/mo · billed yearly</p>
+        <ul>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M4 12l5 5L20 6"/></svg>Realtime multiplayer reversing</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M4 12l5 5L20 6"/></svg>Shared symbol servers, self-host</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M4 12l5 5L20 6"/></svg>SSO / SAML + audit log</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M4 12l5 5L20 6"/></svg>SLA + private support channel</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M4 12l5 5L20 6"/></svg>Everything in Pro</li>
+        </ul>
+        <button class="btn btn-s" id="trialTeamBtn">Start team trial</button>
+      </article>
+    </div>
+    <p class="price-fine rv">Prices USD. Community core is MIT — your output, symbols and scripts are yours, always exportable.</p>
+  </div>
+</section>
+
+<!-- ================= CHANGELOG ================= -->
+<section class="sec" id="changelog">
+  <div class="wrap">
+    <div class="sec-head rv"><div class="eyebrow">// 05 — changelog</div><h2>Shipping in <span class="grad">the open.</span></h2><p class="lede">Every build signed, every change logged. The last three releases:</p></div>
+    <div class="cl-list">
+      <div class="cl-item rv">
+        <div class="cl-head"><span class="cl-ver">v1.4.2</span><span class="cl-name">hotfix</span><span class="cl-date">Nov 12, 2026</span></div>
+        <ul>
+          <li><span class="tag t-fix">fix</span>ARM64 pointer-auth hints no longer confuse the prologue matcher</li>
+          <li><span class="tag t-perf">perf</span>Hex view renders 10× faster on 100 MB+ sections (lazy row virtualization)</li>
+          <li><span class="tag t-sec">sec</span>Parser hardening: fuzzed PE delay-import table, 0 crashes in 48 h</li>
+        </ul>
+      </div>
+      <div class="cl-item rv" style="--d:.08s">
+        <div class="cl-head"><span class="cl-ver">v1.4.0</span><span class="cl-name">“Prism”</span><span class="cl-date">Oct 28, 2026</span></div>
+        <ul>
+          <li><span class="tag t-feat">feat</span>Time-travel debugger: scrub, reverse-step, and branch from any snapshot</li>
+          <li><span class="tag t-feat">feat</span>Name proposals from string context and cross-function dataflow</li>
+          <li><span class="tag t-api">api</span><span><code>emulate.call()</code> — call any function with controlled memory, no device</span></li>
+        </ul>
+      </div>
+      <div class="cl-item rv" style="--d:.16s">
+        <div class="cl-head"><span class="cl-ver">v1.3.0</span><span class="cl-name">“Relay”</span><span class="cl-date">Sep 30, 2026</span></div>
+        <ul>
+          <li><span class="tag t-feat">feat</span>Studio realtime sync: CRDT symbols, shared cursors, zero merge conflicts</li>
+          <li><span class="tag t-perf">perf</span>Cold analysis parallelized across all cores — 9.8× median speedup</li>
+          <li><span class="tag t-fix">fix</span>RISC-V compressed branches resolved correctly across page boundaries</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= FAQ ================= -->
+<section class="sec" id="faq">
+  <div class="wrap">
+    <div class="faq-grid">
+      <div class="sec-head rv">
+        <div class="eyebrow">// 06 — faq</div>
+        <h2>Fair <span class="grad">questions.</span></h2>
+        <p class="lede">The things people actually ask before pointing a tool at sensitive binaries.</p>
+      </div>
+      <div class="faq-list rv" style="--d:.1s">
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">Does Hexlight work fully offline?<svg class="chev" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
+          <div class="faq-a"><div><p>Fully. Analysis, decompilation, debugging and scripting run locally. Studio sync is opt-in and can be self-hosted; the Community tier never opens a socket.</p></div></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">How good is the decompiler, honestly?<svg class="chev" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
+          <div class="faq-a"><div><p>On our public corpus (2,140 functions across 12 projects) 94% of local types are recovered correctly and 81% of proposed names match maintainer intent. It's assistive, not magic — every proposal is one keystroke from override.</p></div></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">Which languages can I script in?<svg class="chev" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
+          <div class="faq-a"><div><p>Python 3.12 embedded, with a typed API mirroring every UI action. Headless mode runs the same scripts in CI. Lua and JS runtimes are on the 1.5 roadmap.</p></div></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">Does it phone home?<svg class="chev" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
+          <div class="faq-a"><div><p>No telemetry, no analytics, no crash uploads by default. Update checks are a single signed manifest request you can disable — or mirror on your own infra with <code>hexlight config updates.mirror</code>.</p></div></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">Can I use it commercially?<svg class="chev" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
+          <div class="faq-a"><div><p>Yes. The Community core is MIT. Pro and Studio add capabilities, not restrictions — your output, symbols and scripts are yours, always exportable in open formats.</p></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= DOWNLOAD ================= -->
+<section class="sec" id="download">
+  <div class="wrap">
+    <div class="dl-hero rv">
+      <div class="eyebrow">// 07 — get it</div>
+      <h2>Point it at something <span class="grad">suspicious.</span></h2>
+      <p class="lede">Fourteen megabytes. Thirty-seven architectures. Your first binary in under a minute.</p>
+    </div>
+    <div class="dl-cards">
+      <article class="dl-card rv" data-os="windows">
+        <span class="rec-chip">RECOMMENDED FOR YOU</span>
+        <div class="dl-os"><svg viewBox="0 0 24 24"><path d="M3 5.5 10.5 4.4v7.1H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7.1L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg><h3>Windows</h3></div>
+        <p class="dl-meta">10 / 11 · x86-64 &amp; arm64 · 14.2 MB</p>
+        <div class="dl-cmd"><code>winget install Hexlight.Hexlight</code><button class="icon-copy" data-copy="winget install Hexlight.Hexlight" aria-label="Copy Windows install command"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></div>
+        <button class="btn btn-p dl-btn" data-os="windows">Installer · .ps1</button>
+        <div class="dl-sum"><span>sha256</span><code>9f2c41d7a83b…b0e83a1f</code><button class="icon-copy" data-copy="9f2c41d7a83b5e604c1198d2f7aa30c4d95e1b7f60a2c83d4e5f60718293a4b5c6d7e8f9012345678b0e83a1f" aria-label="Copy Windows checksum"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></div>
+      </article>
+      <article class="dl-card rv" data-os="linux" style="--d:.08s">
+        <span class="rec-chip">RECOMMENDED FOR YOU</span>
+        <div class="dl-os"><svg viewBox="0 0 24 24"><path d="M12 2c-2.2 0-3.5 1.8-3.5 4.2 0 1.5.4 2.6.2 3.8-.3 1.5-1.8 2.7-2.6 4.6-.6 1.4-.8 3-.4 3.9.3.6 1.2.7 2 .9.9.2 1.6 1.1 2.9 1.4.5.1 1 .1 1.4.1s.9 0 1.4-.1c1.3-.3 2-1.2 2.9-1.4.8-.2 1.7-.3 2-.9.4-.9.2-2.5-.4-3.9-.8-1.9-2.3-3.1-2.6-4.6-.2-1.2.2-2.3.2-3.8C15.5 3.8 14.2 2 12 2zm-1.6 4.6c.5 0 .9.5.9 1.1s-.4 1.1-.9 1.1-.9-.5-.9-1.1.4-1.1.9-1.1zm3.2 0c.5 0 .9.5.9 1.1s-.4 1.1-.9 1.1-.9-.5-.9-1.1.4-1.1.9-1.1z"/></svg><h3>Linux</h3></div>
+        <p class="dl-meta">glibc 2.31+ / musl · x86-64 &amp; arm64 · 13.8 MB</p>
+        <div class="dl-cmd"><code>curl -fsSL https://hexlight.dev/install.sh | sh</code><button class="icon-copy" data-copy="curl -fsSL https://hexlight.dev/install.sh | sh" aria-label="Copy Linux install command"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></div>
+        <button class="btn btn-p dl-btn" data-os="linux">Installer · .sh</button>
+        <div class="dl-sum"><span>sha256</span><code>4a1be092cd71…9d20f6e8</code><button class="icon-copy" data-copy="4a1be092cd715f38a20b96c4e1d5f7a8093b2c4d5e6f708192a3b4c5d6e7f801234567890abcdef9d20f6e8" aria-label="Copy Linux checksum"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></div>
+      </article>
+      <article class="dl-card rv" data-os="macos" style="--d:.16s">
+        <span class="rec-chip">RECOMMENDED FOR YOU</span>
+        <div class="dl-os"><svg viewBox="0 0 24 24"><path d="M16.7 12.9c0-2.4 2-3.6 2.1-3.7-1.1-1.7-2.9-1.9-3.5-1.9-1.5-.2-2.9.9-3.7.9-.8 0-1.9-.9-3.2-.8-1.6 0-3.1 1-4 2.4-1.7 3-.4 7.4 1.2 9.8.8 1.2 1.8 2.5 3.1 2.4 1.2-.1 1.7-.8 3.2-.8s1.9.8 3.2.8c1.3 0 2.2-1.2 3-2.4.9-1.4 1.3-2.7 1.3-2.8-.1 0-2.6-1-2.7-3.9zM14.4 5.6c.7-.8 1.1-1.9 1-3.1-1 0-2.2.7-2.9 1.5-.6.7-1.2 1.9-1 3 1.1.1 2.2-.6 2.9-1.4z"/></svg><h3>macOS</h3></div>
+        <p class="dl-meta">13+ · Apple Silicon &amp; Intel · 14.6 MB</p>
+        <div class="dl-cmd"><code>brew install hexlight</code><button class="icon-copy" data-copy="brew install hexlight" aria-label="Copy macOS install command"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></div>
+        <button class="btn btn-p dl-btn" data-os="macos">Installer · .sh</button>
+        <div class="dl-sum"><span>sha256</span><code>c83f11a0b9e2…47aa9c0d</code><button class="icon-copy" data-copy="c83f11a0b9e25d47610c83a2f9b4d6e705182a3c4d5e6f708192a3b4c5d6e7f80123456789abcdef0123447aa9c0d" aria-label="Copy macOS checksum"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></div>
+      </article>
+    </div>
+    <p class="dl-fine rv">v1.4.2 “Prism” · signed builds · <b>demo site: installer downloads are stub scripts</b> that print the real commands.<br>Prefer source? The Community core builds with <b>cmake --preset release</b> in about four minutes.</p>
+  </div>
+</section>
+</main>
+
+<!-- ================= FOOTER ================= -->
+<footer>
+  <div class="wrap">
+    <div class="ft-grid">
+      <div class="ft-brand">
+        <a class="logo" href="#top"><svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><path d="M16 2 28 9v14L16 30 4 23V9z" fill="none" stroke="#2cff8f" stroke-width="2.2"/><path d="M6 16h9" stroke="#e9f6ef" stroke-width="1.8"/><path d="M15 16l9-6" stroke="#2cff8f" stroke-width="1.8"/><path d="M15 16h10" stroke="#22d9ee" stroke-width="1.8"/><path d="M15 16l9 6" stroke="#ff4d9d" stroke-width="1.8"/></svg>hexlight</a>
+        <p>Instruments for people who read machines. Built by reverse engineers, for reverse engineers.</p>
+        <span class="status-chip"><i class="dot"></i>all beams nominal</span>
+      </div>
+      <div class="ft-col">
+        <h4>Product</h4>
+        <ul><li><a href="#workbench">Live workbench</a></li><li><a href="#features">Features</a></li><li><a href="#benchmarks">Benchmarks</a></li><li><a href="#pricing">Pricing</a></li><li><a href="#changelog">Changelog</a></li></ul>
+      </div>
+      <div class="ft-col">
+        <h4>Resources</h4>
+        <ul><li><a href="#scripting">Scripting tour</a></li><li><a href="#faq">FAQ</a></li><li><a href="#download">Install guide</a></li><li><button class="cmdk-open">Command palette</button></li><li><a href="mailto:hello@hexlight.dev">hello@hexlight.dev</a></li></ul>
+      </div>
+      <div class="ft-col">
+        <h4>Release notes, monthly</h4>
+        <p class="news-p">One email per release. Deep dives, no fluff.</p>
+        <form class="news-form" id="newsForm" novalidate>
+          <input type="email" id="newsEmail" placeholder="you@lab.example" aria-label="Email for release notes">
+          <button class="btn btn-p btn-sm" type="submit">Join</button>
+        </form>
+        <p class="news-err" id="newsErr">that address doesn't parse — try again</p>
+        <p class="news-ok" id="newsOk"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 12l5 5L20 6"/></svg>You're on the list. See you at 1.5.</p>
+      </div>
+    </div>
+    <div class="ft-bottom">
+      <span>© <span id="year">2026</span> Hexlight Systems</span>
+      <span>0 dependencies · 1 file · view-source friendly</span>
+      <button class="cmdk cmdk-open"><span>Command palette</span><kbd>Ctrl K</kbd></button>
+    </div>
+  </div>
+</footer>
+
+<!-- ================= PALETTE ================= -->
+<div class="overlay" id="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="pal">
+    <div class="pal-in">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palInput" placeholder="Type a command or section…" autocomplete="off" spellcheck="false" aria-label="Search commands">
+    </div>
+    <div class="pal-list" id="palList" role="listbox"></div>
+    <div class="pal-foot"><span><kbd>↑↓</kbd> navigate</span><span><kbd>↵</kbd> run</span><span><kbd>esc</kbd> close</span></div>
+  </div>
+</div>
+
+<!-- ================= TRIAL MODAL ================= -->
+<div class="overlay" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div class="modal">
+    <button class="modal-x" id="modalClose" aria-label="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <div id="trialFormWrap">
+      <h3 id="modalTitle">Start your Pro trial</h3>
+      <p class="m-sub" id="modalSub">14 days, every feature, no card. <b id="modalPrice">$12/mo after</b> — cancel with one click.</p>
+      <form id="trialForm" novalidate>
+        <div class="m-field"><label for="trialEmail">Work email</label><input type="email" id="trialEmail" placeholder="you@lab.example" autocomplete="email"></div>
+        <p class="m-err" id="trialErr">that address doesn't parse — check the @ and domain</p>
+        <button class="btn btn-p" type="submit" id="trialSubmit"><span class="spinner"></span><span class="btn-txt">Send my trial key</span></button>
+      </form>
+      <p class="m-fine">Demo build — keys are generated locally in your browser.<br>The real thing sends one email. That's it.</p>
+    </div>
+    <div class="m-success" id="trialSuccess">
+      <svg class="check-ring" viewBox="0 0 66 66"><circle cx="33" cy="33" r="30"/><path d="M21 34l8 8 16-17"/></svg>
+      <h4>Trial key minted</h4>
+      <p>Activated for <b id="keyEmail" style="color:var(--tx)"></b>. Paste it into Hexlight → Settings → License.</p>
+      <div class="key-out"><code id="keyOut">HXL-PRO-0000-0000</code><button class="icon-copy" id="copyKeyBtn" aria-label="Copy trial key"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></div>
+      <button class="btn btn-s" id="successDone">Back to the site</button>
+    </div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+'use strict';
+/* ---------- helpers ---------- */
+const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s));
+const RM=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const hex=(n,w)=>'0x'+(n>>>0).toString(16).padStart(w||8,'0');
+const hex64=n=>'0x'+BigInt(n>>>0).toString(16).padStart(16,'0');
+const ICONS={ok:'<svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M4 12l5 5L20 6"/></svg>',info:'<svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M12 11v5"/></svg>',err:'<svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round"><path d="M12 3 2.5 20h19zM12 10v4m0 3h.01"/></svg>'};
+function toast(msg,type){
+  type=type||'ok';const box=$('#toasts');if(!box)return;
+  while(box.children.length>=4)box.firstChild.remove();
+  const t=document.createElement('div');t.className='toast '+type;t.innerHTML=ICONS[type]||ICONS.ok;
+  const s=document.createElement('span');s.textContent=msg;t.appendChild(s);box.appendChild(t);
+  requestAnimationFrame(()=>requestAnimationFrame(()=>t.classList.add('on')));
+  setTimeout(()=>{t.classList.remove('on');setTimeout(()=>t.remove(),350)},3600);
+}
+function copyText(txt,msg){
+  const done=()=>toast(msg||'Copied to clipboard','ok');
+  const fail=()=>toast('Copy failed — select it manually','err');
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(txt).then(done,()=>fallback());}
+  else fallback();
+  function fallback(){try{const ta=document.createElement('textarea');ta.value=txt;ta.style.cssText='position:fixed;opacity:0';document.body.appendChild(ta);ta.select();const ok=document.execCommand('copy');ta.remove();ok?done():fail();}catch(e){fail();}}
+}
+function scrollToId(id){const el=document.getElementById(id);if(el)el.scrollIntoView({behavior:RM?'auto':'smooth',block:'start'});}
+function tween(from,to,dur,fn){
+  if(RM){fn(to);return()=>{};}
+  let raf,start=null,dead=false;
+  const step=t=>{if(dead)return;if(start===null)start=t;const p=clamp((t-start)/dur,0,1),e=1-Math.pow(1-p,3);fn(from+(to-from)*e);if(p<1)raf=requestAnimationFrame(step);};
+  raf=requestAnimationFrame(step);return()=>{dead=true;cancelAnimationFrame(raf);};
+}
+$('#year').textContent=new Date().getFullYear();
+
+/* ---------- nav / scroll ---------- */
+const nav=$('#nav'),progress=$('#progressBar'),menuBtn=$('#menuBtn'),mobileMenu=$('#mobileMenu');
+const secIds=['workbench','features','scripting','benchmarks','pricing','changelog','faq','download'];
+const navLinks=$$('.nav-link[data-sec]');
+let scrollTick=false;
+function onScroll(){
+  if(scrollTick)return;scrollTick=true;
+  requestAnimationFrame(()=>{
+    scrollTick=false;const y=scrollY;
+    nav.classList.toggle('scrolled',y>8);
+    const h=document.documentElement.scrollHeight-innerHeight;
+    progress.style.width=(h>0?(y/h)*100:0)+'%';
+    let cur='';
+    for(const id of secIds){const el=document.getElementById(id);if(el&&el.getBoundingClientRect().top<innerHeight*.4)cur=id;}
+    navLinks.forEach(a=>{const on=a.dataset.sec===cur;a.classList.toggle('on',on);if(on)a.setAttribute('aria-current','true');else a.removeAttribute('aria-current');});
+    if(!RM){
+      const wbPar=$('#wbPar'),sp=$('#statsPar');
+      if(wbPar)wbPar.style.translate='0 '+clamp(y*.06,0,48)+'px';
+      if(sp)sp.style.translate='0 '+clamp(y*-.03,-24,0)+'px';
+    }
+  });
+}
+addEventListener('scroll',onScroll,{passive:true});onScroll();
+function closeMenu(){mobileMenu.classList.remove('open');menuBtn.setAttribute('aria-expanded','false');}
+menuBtn.addEventListener('click',()=>{const open=mobileMenu.classList.toggle('open');menuBtn.setAttribute('aria-expanded',String(open));});
+mobileMenu.addEventListener('click',e=>{if(e.target.closest('a'))closeMenu();});
+addEventListener('resize',()=>{if(innerWidth>1120)closeMenu();});
+
+/* ---------- reveals & counters ---------- */
+const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}}),{threshold:.12,rootMargin:'0px 0px -6% 0px'});
+$$('.rv').forEach(el=>io.observe(el));
+const cio=new IntersectionObserver(es=>es.forEach(e=>{
+  if(!e.isIntersecting)return;cio.unobserve(e.target);
+  const el=e.target,to=parseFloat(el.dataset.count),dec=parseInt(el.dataset.dec||'0',10);
+  tween(0,to,1400,v=>{el.textContent=v.toFixed(dec);});
+}),{threshold:.5});
+$$('[data-count]').forEach(el=>cio.observe(el));
+
+/* ---------- hero canvas ---------- */
+(function(){
+  const cv=$('#bgCanvas'),hero=$('#hero');if(!cv||!hero)return;
+  const ctx=cv.getContext('2d');if(!ctx)return;
+  const DPR=clamp(devicePixelRatio||1,1,1.75);
+  const GLYPHS=['2c','ff','8f','0a','f3','9e','41','d7','b8','65','e8','7f','c3','55','15','0x'];
+  const COLORS=['44,255,143','34,217,238','255,77,157','255,178,36'];
+  let W=0,H=0,visible=true,parts=[];
+  function size(){
+    const r=hero.getBoundingClientRect();const nw=Math.max(1,r.width),nh=Math.max(1,r.height);
+    if(W>0){parts.forEach(p=>{p.x*=nw/W;p.y*=nh/H;});}
+    W=nw;H=nh;cv.width=W*DPR;cv.height=H*DPR;cv.style.width=W+'px';cv.style.height=H+'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  function seed(){
+    parts=[];const n=Math.round(clamp(W/18,40,80));
+    for(let i=0;i<n;i++)parts.push({x:Math.random()*W,y:Math.random()*H,v:.12+Math.random()*.3,g:GLYPHS[(Math.random()*GLYPHS.length)|0],c:COLORS[Math.random()<.72?(Math.random()*2)|0:2+((Math.random()*2)|0)],a:.12+Math.random()*.3,s:9+Math.random()*4,ph:Math.random()*6.28});
+  }
+  size();seed();
+  new ResizeObserver(()=>{size();if(RM)draw(0);}).observe(hero);
+  new IntersectionObserver(es=>{visible=es[0].isIntersecting;},{threshold:0}).observe(hero);
+  let mx=-999,my=-999;
+  hero.addEventListener('pointermove',e=>{const r=cv.getBoundingClientRect();mx=e.clientX-r.left;my=e.clientY-r.top;},{passive:true});
+  hero.addEventListener('pointerleave',()=>{mx=my=-999;});
+  function draw(t){
+    ctx.clearRect(0,0,W,H);
+    ctx.font='11px JetBrains Mono, monospace';
+    for(const p of parts){
+      const dx=p.x-mx,dy=p.y-my,d2=dx*dx+dy*dy;
+      if(d2<14400&&d2>1){const d=Math.sqrt(d2);p.x+=dx/d*.5;p.y+=dy/d*.5;}
+      const wob=Math.sin(t*.0006+p.ph)*8;
+      ctx.fillStyle='rgba('+p.c+','+p.a+')';
+      ctx.fillText(p.g,p.x+wob,p.y);
+    }
+    ctx.lineWidth=1;
+    for(let i=0;i<parts.length;i++)for(let j=i+1;j<parts.length;j++){
+      const a=parts[i],b=parts[j],dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy;
+      if(d2<8100){ctx.strokeStyle='rgba(44,255,143,'+(0.09*(1-d2/8100))+')';ctx.beginPath();ctx.moveTo(a.x,a.y-4);ctx.lineTo(b.x,b.y-4);ctx.stroke();}
+    }
+  }
+  if(RM){draw(0);return;}
+  function loop(t){
+    if(visible&&!document.hidden){
+      for(const p of parts){p.y-=p.v;if(p.y<-14){p.y=H+14;p.x=Math.random()*W;}}
+      draw(t);
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+
+/* ---------- spotlight cards ---------- */
+$$('.spot').forEach(c=>c.addEventListener('pointermove',e=>{
+  const r=c.getBoundingClientRect();
+  c.style.setProperty('--mx',(e.clientX-r.left)+'px');
+  c.style.setProperty('--my',(e.clientY-r.top)+'px');
+},{passive:true}));
+
+/* ================================================================
+   LIVE WORKBENCH — real crackme, real interpreter
+================================================================ */
+const DEMO=(function(){
+  const KEY_SECRET='HEXLIGHT-PRISM!!';
+  const EXP=Array.from(KEY_SECRET,c=>c.charCodeAt(0)^0x2a);
+  const KEY_PTR=0x404060;
+  /* function database — hand-assembled x86-64 */
+  const FNS={
+    _start:{addr:0x401060,name:'_start',insns:[
+      [0x401060,'31 ed','xor','<span class="rg">ebp</span>, <span class="rg">ebp</span>'],
+      [0x401062,'49 89 d1','mov','<span class="rg">r9</span>, <span class="rg">rdx</span>'],
+      [0x401065,'5e','pop','<span class="rg">rsi</span>'],
+      [0x401066,'48 89 e2','mov','<span class="rg">rdx</span>, <span class="rg">rsp</span>'],
+      [0x401069,'48 83 e4 f0','and','<span class="rg">rsp</span>, <span class="im">-0x10</span>'],
+      [0x40106d,'50','push','<span class="rg">rax</span>'],
+      [0x40106e,'54','push','<span class="rg">rsp</span>'],
+      [0x40106f,'48 8d 3d 8a 01 00 00','lea','<span class="rg">rdi</span>, [<span class="rg">rip</span>+<span class="im">0x18a</span>] <span class="cm">; main</span>'],
+      [0x401076,'e8 a5 ff ff ff','call','<span class="im">0x401020</span> <span class="cm">; __libc_start_main</span>'],
+      [0x40107b,'f4','hlt','']
+    ],note:'<b>_start</b> is libc bootstrap. Hexlight annotates it instead of decompiling — rdi is loaded with <b>main</b> at +0xf, then control transfers to __libc_start_main.'},
+    main:{addr:0x401200,name:'main',xref:null,insns:[
+      [0x401200,'55','push','<span class="rg">rbp</span>'],
+      [0x401201,'48 89 e5','mov','<span class="rg">rbp</span>, <span class="rg">rsp</span>'],
+      [0x401204,'48 8d 3d 05 0e 00 00','lea','<span class="rg">rdi</span>, [<span class="rg">rip</span>+<span class="im">0xe05</span>] <span class="cm">; "Enter key: "</span>',0],
+      [0x40120b,'e8 30 fe ff ff','call','<span class="im">0x401040</span> <span class="cm">; puts@plt</span>',1],
+      [0x401210,'48 8d 3d 49 2e 00 00','lea','<span class="rg">rdi</span>, [<span class="rg">rip</span>+<span class="im">0x2e49</span>] <span class="cm">; g_buf</span>',2],
+      [0x401217,'e8 34 fe ff ff','call','<span class="im">0x401050</span> <span class="cm">; gets@plt ⚠</span>',2],
+      [0x40121c,'e8 7f ff ff ff','call','<span class="fn" style="color:var(--grn)">check_license</span>',3],
+      [0x401221,'85 c0','test','<span class="rg">eax</span>, <span class="rg">eax</span>',3],
+      [0x401223,'74 0e','je','<span class="im">0x401233</span>',3],
+      [0x401225,'48 8d 3d fc 0d 00 00','lea','<span class="rg">rdi</span>, [<span class="rg">rip</span>+<span class="im">0xdfc</span>] <span class="cm">; accepted</span>',4],
+      [0x40122c,'e8 0f fe ff ff','call','<span class="im">0x401040</span> <span class="cm">; puts@plt</span>',4],
+      [0x401231,'eb 0c','jmp','<span class="im">0x40123f</span>',6],
+      [0x401233,'48 8d 3d 02 0e 00 00','lea','<span class="rg">rdi</span>, [<span class="rg">rip</span>+<span class="im">0xe02</span>] <span class="cm">; rejected</span>',5],
+      [0x40123a,'e8 01 fe ff ff','call','<span class="im">0x401040</span> <span class="cm">; puts@plt</span>',5],
+      [0x40123f,'31 c0','xor','<span class="rg">eax</span>, <span class="rg">eax</span>',6],
+      [0x401241,'c9','leave','',7],
+      [0x401242,'c3','ret','',7]
+    ],dec:[
+      '<span class="ty">int32_t</span> <span class="fn">main</span>(<span class="ty">void</span>) {',
+      '  <span class="fn">puts</span>(<span class="st">"Enter key: "</span>);',
+      '  <span class="fn">gets</span>(g_buf);            <span class="cm">// ⚠ unbounded read</span>',
+      '  <span class="kw">if</span> (<span class="fn">check_license</span>(g_buf))',
+      '    <span class="fn">puts</span>(<span class="st">"License accepted"</span>);',
+      '  <span class="kw">else</span> <span class="fn">puts</span>(<span class="st">"License rejected"</span>);',
+      '  <span class="kw">return</span> <span class="nm">0</span>;',
+      '}'
+    ]},
+    check_license:{addr:0x4011a0,name:'check_license',xref:{fn:'main',idx:6,label:'← main+0x1c'},insns:[
+      [0x4011a0,'55','push','<span class="rg">rbp</span>',0],
+      [0x4011a1,'48 89 e5','mov','<span class="rg">rbp</span>, <span class="rg">rsp</span>',0],
+      [0x4011a4,'48 83 ec 20','sub','<span class="rg">rsp</span>, <span class="im">0x20</span>',0],
+      [0x4011a8,'48 89 7d e8','mov','[<span class="rg">rbp</span>-<span class="im">0x18</span>], <span class="rg">rdi</span> <span class="cm">; key</span>',0],
+      [0x4011ac,'e8 7f fe ff ff','call','<span class="im">0x401030</span> <span class="cm">; strlen@plt</span>',1],
+      [0x4011b1,'48 83 f8 10','cmp','<span class="rg">rax</span>, <span class="im">0x10</span>',1],
+      [0x4011b5,'75 38','jne','<span class="im">0x4011ef</span> <span class="cm">; → fail</span>',1],
+      [0x4011b7,'c7 45 fc 00 00 00 00','mov','<span class="kw" style="color:var(--mag)">dword</span> [<span class="rg">rbp</span>-<span class="im">0x4</span>], <span class="im">0x0</span>',3],
+      [0x4011be,'8b 45 fc','mov','<span class="rg">eax</span>, [<span class="rg">rbp</span>-<span class="im">0x4</span>] <span class="cm">; i</span>',3],
+      [0x4011c1,'48 63 c8','movsxd','<span class="rg">rcx</span>, <span class="rg">eax</span>',4],
+      [0x4011c4,'48 8b 55 e8','mov','<span class="rg">rdx</span>, [<span class="rg">rbp</span>-<span class="im">0x18</span>]',4],
+      [0x4011c8,'0f b6 04 0a','movzx','<span class="rg">eax</span>, <span class="kw" style="color:var(--mag)">byte</span> [<span class="rg">rdx</span>+<span class="rg">rcx</span>]',4],
+      [0x4011cc,'83 f0 2a','xor','<span class="rg">eax</span>, <span class="im">0x2a</span>',4],
+      [0x4011cf,'48 8d 15 2a 0e 00 00','lea','<span class="rg">rdx</span>, [<span class="rg">rip</span>+<span class="im">0xe2a</span>] <span class="cm">; g_expected</span>',4],
+      [0x4011d6,'8b 4d fc','mov','<span class="rg">ecx</span>, [<span class="rg">rbp</span>-<span class="im">0x4</span>]',4],
+      [0x4011d9,'3a 04 0a','cmp','<span class="rg">al</span>, <span class="kw" style="color:var(--mag)">byte</span> [<span class="rg">rdx</span>+<span class="rg">rcx</span>]',4],
+      [0x4011dc,'75 11','jne','<span class="im">0x4011ef</span> <span class="cm">; → fail</span>',5],
+      [0x4011de,'83 45 fc 01','add','<span class="kw" style="color:var(--mag)">dword</span> [<span class="rg">rbp</span>-<span class="im">0x4</span>], <span class="im">0x1</span>',3],
+      [0x4011e2,'83 7d fc 10','cmp','<span class="kw" style="color:var(--mag)">dword</span> [<span class="rg">rbp</span>-<span class="im">0x4</span>], <span class="im">0x10</span>',3],
+      [0x4011e6,'7c d6','jl','<span class="im">0x4011be</span> <span class="cm">; loop</span>',3],
+      [0x4011e8,'b8 01 00 00 00','mov','<span class="rg">eax</span>, <span class="im">0x1</span>',7],
+      [0x4011ed,'eb 02','jmp','<span class="im">0x4011f1</span>',8],
+      [0x4011ef,'31 c0','xor','<span class="rg">eax</span>, <span class="rg">eax</span> <span class="cm">; fail</span>',5],
+      [0x4011f1,'c9','leave','',8],
+      [0x4011f2,'c3','ret','',8]
+    ],dec:[
+      '<span class="ty">int32_t</span> <span class="fn">check_license</span>(<span class="kw">const</span> <span class="ty">char</span>* key) {',
+      '  <span class="kw">if</span> (<span class="fn">strlen</span>(key) != <span class="nm">16</span>)',
+      '    <span class="kw">return</span> <span class="nm">0</span>;',
+      '  <span class="kw">for</span> (<span class="ty">int32_t</span> i = <span class="nm">0</span>; i &lt; <span class="nm">16</span>; i++) {',
+      '    <span class="kw">if</span> ((key[i] ^ <span class="nm">0x2a</span>) != g_expected[i])',
+      '      <span class="kw">return</span> <span class="nm">0</span>;',
+      '  }',
+      '  <span class="kw">return</span> <span class="nm">1</span>;',
+      '}'
+    ]},
+    'strlen@plt':{addr:0x401030,name:'strlen@plt',insns:[
+      [0x401030,'ff 25 da 2f 00 00','jmp','<span class="kw" style="color:var(--mag)">qword</span> [<span class="rg">rip</span>+<span class="im">0x2fda</span>] <span class="cm">; strlen@got</span>'],
+      [0x401035,'68 00 00 00 00','push','<span class="im">0x0</span>'],
+      [0x40103a,'e9 c1 ff ff ff','jmp','<span class="im">0x401000</span> <span class="cm">; plt0</span>']
+    ],note:'Import thunk → <b>strlen</b> (libc). Lazy binding via .got.plt @ <b>0x404010</b>. Hexlight resolves it statically so calls show real names.'},
+    'puts@plt':{addr:0x401040,name:'puts@plt',insns:[
+      [0x401040,'ff 25 d2 2f 00 00','jmp','<span class="kw" style="color:var(--mag)">qword</span> [<span class="rg">rip</span>+<span class="im">0x2fd2</span>] <span class="cm">; puts@got</span>'],
+      [0x401046,'68 01 00 00 00','push','<span class="im">0x1</span>'],
+      [0x40104b,'e9 b1 ff ff ff','jmp','<span class="im">0x401000</span> <span class="cm">; plt0</span>']
+    ],note:'Import thunk → <b>puts</b> (libc). GOT slot @ <b>0x404018</b>.'},
+    'gets@plt':{addr:0x401050,name:'gets@plt',insns:[
+      [0x401050,'ff 25 ca 2f 00 00','jmp','<span class="kw" style="color:var(--mag)">qword</span> [<span class="rg">rip</span>+<span class="im">0x2fca</span>] <span class="cm">; gets@got</span>'],
+      [0x401055,'68 02 00 00 00','push','<span class="im">0x2</span>'],
+      [0x40105a,'e9 a1 ff ff ff','jmp','<span class="im">0x401000</span> <span class="cm">; plt0</span>']
+    ],note:'Import thunk → <b>gets</b> (libc). <b>⚠ deprecated &amp; unbounded</b> — Hexlight flags every call site in red.'}
+  };
+  const FN_ORDER=['_start','main','check_license','strlen@plt','puts@plt','gets@plt'];
+  const DATA={
+    expected:{addr:0x402000,label:'g_expected · .rodata',bytes:EXP},
+    buf:{addr:0x404060,label:'g_buf · .bss (zero-initialized)',bytes:new Array(32).fill(0)}
+  };
+  /* dom */
+  const wb=$('#wb'),fnList=$('#fnList'),disRows=$('#disRows'),decRows=$('#decRows'),hexRows=$('#hexRows'),conRows=$('#conRows');
+  const disPane=$('#disPane'),decPane=$('#decPane'),hexPane=$('#hexPane'),conPane=$('#conPane');
+  const traceBtn=$('#traceBtn'),stepBtn=$('#stepBtn'),resetBtn=$('#resetBtn'),keyInput=$('#keyInput');
+  const dataChip=$('#dataChip'),hintBtn=$('#hintBtn'),hintBar=$('#hintBar'),xrefChip=$('#xrefChip');
+  const led=$('#statusLed'),stText=$('#statusText'),stMsg=$('#statusMsg');
+  if(!wb)return{run(){},pause(){},reset(){},reveal(){},showData(){},setKey(){}};
+  /* state */
+  let curFn='check_license',hexTarget='fn',selIdx=-1,timer=null,running=false,steps=0,hintShown=false;
+  const S={};
+  function initState(){
+    S.pc=0;S.rax=0;S.rcx=0;S.rdx=0;S.rdi=KEY_PTR;S.rbp=0x7ffd00a0;S.rsp=0x7ffd00a0;S.i=0;S.zf=false;S.sf=false;S.halted=false;S.result=null;steps=0;
+  }
+  initState();
+  const curKey=()=>keyInput.value;
+  /* logging */
+  function log(tag,msg,cls){
+    const row=document.createElement('div');row.className='log '+(cls||'dim');
+    const t=document.createElement('span');t.className='tag';t.textContent='['+tag+']';
+    const m=document.createElement('span');m.className='msg';m.textContent=msg;
+    row.appendChild(t);row.appendChild(m);conRows.appendChild(row);
+    while(conRows.children.length>90)conRows.firstChild.remove();
+    conPane.scrollTop=conPane.scrollHeight;
+    stMsg.textContent=msg;
+  }
+  log('init','hexlight 1.4.2 — session started','info');
+  log('load','crackme.elf · ELF64 · x86-64 · 6 functions','info');
+  log('ok','analysis complete in 0.03 s — press ▶ to trace check_license','ok');
+  /* rendering */
+  function fnBytes(f){const out=[];f.insns.forEach(ins=>ins[1].split(' ').forEach(b=>out.push(parseInt(b,16))));return out;}
+  function renderFns(){
+    fnList.innerHTML=FN_ORDER.map(k=>{const f=FNS[k];return '<button class="fn-item'+(k===curFn?' on':'')+'" data-fn="'+k+'"><span class="fx">ƒ</span>'+f.name+'<small>'+hex(f.addr,6)+'</small></button>';}).join('');
+  }
+  function renderDis(){
+    const f=FNS[curFn];
+    $('#disName').textContent=f.name;$('#disAddr').textContent=hex(f.addr,6);
+    if(f.xref){xrefChip.hidden=false;xrefChip.textContent=f.xref.label;}else xrefChip.hidden=true;
+    disRows.innerHTML=f.insns.map((ins,i)=>'<div class="insn" data-i="'+i+'" title="'+ins[2]+' '+ins[3].replace(/<[^>]*>/g,'')+'"><span class="ad">'+hex(ins[0],6)+'</span><span class="by">'+ins[1]+'</span><span class="mn"><b>'+ins[2]+'</b> '+ins[3]+'</span></div>').join('');
+  }
+  function renderDec(){
+    const f=FNS[curFn];
+    decRows.innerHTML=f.dec?f.dec.map((l,i)=>'<span class="dec-line" data-l="'+i+'">'+(l||' ')+'</span>').join(''):'<div class="dec-note">'+f.note+'</div>';
+  }
+  function renderHex(){
+    let bytes,addr,label;
+    if(hexTarget==='fn'){const f=FNS[curFn];bytes=fnBytes(f);addr=f.addr;label=f.name+' · .text';}
+    else{const d=DATA[hexTarget];bytes=d.bytes;addr=d.addr;label=d.label;}
+    $('#hexLabel').textContent=label;
+    let html='';
+    for(let r=0;r<bytes.length;r+=16){
+      const chunk=bytes.slice(r,r+16);
+      const bs=chunk.map((b,j)=>{const idx=r+j;let di='';
+        if(hexTarget==='fn'){let acc=0;const f=FNS[curFn];for(let k=0;k<f.insns.length;k++){acc+=f.insns[k][1].split(' ').length;if(idx<acc){di=' data-i="'+k+'"';break;}}}
+        return '<span class="hx"'+di+'>'+b.toString(16).padStart(2,'0')+'</span>';}).join('');
+      const asc=chunk.map(b=>(b>=32&&b<=126)?String.fromCharCode(b):'·').join('');
+      html+='<div class="hex-row"><span class="ad">'+hex(addr+r,6)+'</span><span class="hex-bytes">'+bs+'</span><span class="hex-asc">'+asc.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</span></div>';
+    }
+    hexRows.innerHTML=html;
+  }
+  function renderRegs(flash){
+    const vals={rip:hex64(FNS.check_license.insns[S.pc]?FNS.check_license.insns[S.pc][0]:0x4011f2),rax:hex64(S.rax),rcx:hex64(S.rcx),rdx:hex64(S.rdx),i:hex(S.i,8)};
+    $$('.rval').forEach(el=>{
+      const k=el.dataset.reg,v=vals[k];
+      if(el.textContent!==v){el.textContent=v;if(flash&&!RM){el.classList.remove('flash');void el.offsetWidth;el.classList.add('flash');}}
+    });
+    $('#flagZ').classList.toggle('on',S.zf);$('#flagS').classList.toggle('on',S.sf);
+  }
+  function setStatus(mode,text){
+    led.className='led'+(mode==='run'?' run':mode==='ok'?' ok':mode==='bad'?' bad':'');
+    stText.textContent=text;
+  }
+  function clearMarks(){
+    $$('.insn.act,.insn.sel').forEach(e=>e.classList.remove('act','sel'));
+    $$('.hx.act,.hx.sel').forEach(e=>e.classList.remove('act','sel'));
+    $$('.dec-line.act').forEach(e=>e.classList.remove('act'));
+  }
+  function markActive(i){
+    $$('.insn.act').forEach(e=>e.classList.remove('act'));
+    $$('.hx.act').forEach(e=>e.classList.remove('act'));
+    $$('.dec-line.act').forEach(e=>e.classList.remove('act'));
+    const row=disRows.querySelector('[data-i="'+i+'"]');
+    if(row){row.classList.add('act');disPane.scrollTop=clamp(row.offsetTop-disPane.clientHeight/2+12,0,disPane.scrollHeight);}
+    if(hexTarget==='fn')hexRows.querySelectorAll('[data-i="'+i+'"]').forEach(e=>e.classList.add('act'));
+    const ins=FNS.check_license.insns[i];
+    if(ins&&ins[4]!==undefined){const l=decRows.querySelector('[data-l="'+ins[4]+'"]');if(l){l.classList.add('act');decPane.scrollTop=clamp(l.offsetTop-decPane.clientHeight/2,0,decPane.scrollHeight);}}
+  }
+  function markSel(i){
+    selIdx=i;clearMarks();
+    const row=disRows.querySelector('[data-i="'+i+'"]');if(row)row.classList.add('sel');
+    if(hexTarget==='fn')hexRows.querySelectorAll('[data-i="'+i+'"]').forEach(e=>e.classList.add('sel'));
+    const f=FNS[curFn],ins=f.insns[i];
+    if(ins&&ins[4]!==undefined){const l=decRows.querySelector('[data-l="'+ins[4]+'"]');if(l)l.classList.add('act');}
+    if(running||S.halted)markActive(S.pc);
+  }
+  /* interpreter — executes the actual gate semantics */
+  function execOne(auto){
+    if(S.halted)return false;
+    const k=curKey(),ins=FNS.check_license.insns[S.pc];
+    steps++;let next=S.pc+1;
+    switch(S.pc){
+      case 0:S.rsp-=8;break;
+      case 1:S.rbp=S.rsp;break;
+      case 2:S.rsp-=0x20;break;
+      case 3:break;
+      case 4:S.rax=k.length;log('call','strlen("'+k+'") → '+k.length,'info');break;
+      case 5:S.zf=(S.rax===16);S.sf=(S.rax<16);break;
+      case 6:if(!S.zf){next=22;log('br','length ≠ 16 → jump to fail @ 0x4011ef','warn');}else log('br','length == 16 → continue','dim');break;
+      case 7:S.i=0;break;
+      case 8:S.rax=S.i;break;
+      case 9:S.rcx=S.rax;break;
+      case 10:S.rdx=KEY_PTR;break;
+      case 11:S.rax=(k.charCodeAt(S.i)&0xff);log('mem','key['+S.i+'] = '+hex(S.rax,2)+" ('"+k[S.i]+"')",'dim');break;
+      case 12:S.rax=(S.rax^0x2a)>>>0;log('exec','xor eax, 0x2a → eax = '+hex(S.rax,2),'info');break;
+      case 13:S.rdx=0x402000;break;
+      case 14:S.rcx=S.i;break;
+      case 15:{const got=S.rax&0xff,want=EXP[S.i];S.zf=(got===want);S.sf=(got<want);log('cmp','i='+S.i+': '+hex(got,2)+' vs g_expected['+S.i+']='+hex(want,2)+(S.zf?' ✓':' ✗'),S.zf?'dim':'warn');break;}
+      case 16:if(!S.zf){next=22;log('br','mismatch at i='+S.i+' → fail','err');}break;
+      case 17:S.i++;break;
+      case 18:S.zf=(S.i===16);S.sf=(S.i<16);break;
+      case 19:
+        if(S.sf){next=8;
+          if(auto&&S.i===2){ /* fast-forward the boring middle */
+            let miss=-1;
+            for(let j=2;j<15;j++){if(((k.charCodeAt(j)&0xff)^0x2a)!==EXP[j]){miss=j;break;}}
+            if(miss>=0){S.i=miss;S.rax=((k.charCodeAt(miss)&0xff)^0x2a)>>>0;S.rcx=miss;S.rdx=0x402000;S.zf=false;S.sf=false;next=16;
+              log('fast','iterations 2–'+(miss-1)+' verified · mismatch at i='+miss,'warn');}
+            else{S.i=15;S.rcx=1;S.rdx=0x402000;S.zf=true;S.sf=true;
+              log('fast','iterations 2–14 verified ✓ (13 iterations, 156 insns elided)','ok');}
+          }
+        }break;
+      case 20:S.rax=1;log('exec','all 16 bytes matched → eax = 1','ok');break;
+      case 21:next=23;break;
+      case 22:S.rax=0;break;
+      case 23:S.rsp=S.rbp;S.rsp+=8;break;
+      case 24:S.halted=true;S.result=S.rax;halt();return false;
+    }
+    S.pc=next;markActive(S.pc);renderRegs(true);
+    setStatus('run','tracing · step '+steps+' · '+hex(FNS.check_license.insns[S.pc][0],6));
+    return true;
+  }
+  function halt(){
+    running=false;clearTimeout(timer);timer=null;
+    traceBtn.textContent='▶ Re-trace';
+    markActive(24);renderRegs(true);
+    setBottomTab('con');
+    if(S.result===1){
+      setStatus('ok','halted · eax = 0x1 — LICENSE ACCEPTED');
+      log('ret','check_license returned 1 — license accepted 🔓','ok');
+      wb.classList.add('cracked');
+      toast('License accepted — you cracked it 🔓','ok');
+      if(!RM)burst();
+    }else{
+      setStatus('bad','halted · eax = 0x0 — license rejected');
+      log('ret','check_license returned 0 — rejected','err');
+      if(!hintShown){hintShown=true;hintBar.classList.add('show');hintBtn.setAttribute('aria-pressed','true');
+        log('hint','g_expected[0] = 0x62 → 0x62 ^ 0x2a = 0x48 = \'H\' … keep going','warn');}
+      wb.classList.remove('cracked');
+    }
+  }
+  function burst(){
+    const box=$('#burst');const hues=['#2cff8f','#22d9ee','#ff4d9d','#ffb224'];
+    for(let i=0;i<16;i++){
+      const s=document.createElement('span');s.className='spark-p';
+      const a=Math.random()*6.28,d=90+Math.random()*220;
+      s.style.setProperty('--tx',Math.cos(a)*d+'px');s.style.setProperty('--ty',Math.sin(a)*d+'px');
+      s.style.setProperty('--hue',hues[i%4]);box.appendChild(s);
+      setTimeout(()=>s.remove(),900);
+    }
+  }
+  function ensureFn(){
+    if(curFn!=='check_license'){selectFn('check_license');}
+  }
+  function reset(silent){
+    running=false;clearTimeout(timer);timer=null;
+    initState();clearMarks();renderRegs(false);
+    traceBtn.textContent='▶ Trace';wb.classList.remove('cracked');
+    setStatus('idle','idle — ready to trace');
+    if(!silent)log('reset','machine state reinitialized · rip = 0x4011a0','dim');
+  }
+  function tick(){
+    if(!running)return;
+    const more=execOne(true);
+    if(more&&running)timer=setTimeout(tick,300);
+  }
+  function run(){
+    ensureFn();
+    if(running){pause();return;}
+    if(S.halted)reset(true);
+    running=true;traceBtn.textContent='⏸ Pause';
+    setStatus('run','tracing · step '+steps);
+    log('trace','▶ tracing check_license("'+curKey()+'")','info');
+    markActive(S.pc);renderRegs(false);
+    timer=setTimeout(tick,180);
+  }
+  function pause(){
+    running=false;clearTimeout(timer);timer=null;
+    traceBtn.textContent='▶ Resume';
+    setStatus('idle','paused · step '+steps+' — ⏭ to single-step');
+  }
+  function step(){
+    ensureFn();
+    if(running)pause();
+    if(S.halted)reset(true);
+    if(S.pc===0&&!steps)log('trace','⏭ single-stepping check_license("'+curKey()+'")','info');
+    execOne(false);
+    if(!S.halted){traceBtn.textContent='▶ Resume';setStatus('idle','paused · step '+steps+' · '+hex(FNS.check_license.insns[S.pc][0],6));}
+  }
+  function selectFn(k){
+    if(!FNS[k])return;
+    if(running)pause();
+    curFn=k;selIdx=-1;
+    renderFns();renderDis();renderDec();
+    if(hexTarget==='fn')renderHex();
+    clearMarks();
+    if(k!=='check_license'){reset(true);setStatus('idle','viewing '+FNS[k].name+' — trace runs check_license');}
+  }
+  function setBottomTab(t){
+    wb.dataset.btab=t;
+    hexPane.style.display=t==='hex'?'':'';
+    /* desktop visibility */
+    if(matchMedia('(min-width:881px)').matches){
+      hexPane.style.display=t==='hex'?'block':'none';
+      conPane.style.display=t==='con'?'block':'none';
+    }else{hexPane.style.display='';conPane.style.display='';wb.dataset.pane='hex';syncPaneTabs();}
+    ['#hexTab','#hexTab2'].forEach(s=>{const b=$(s);if(b)b.setAttribute('aria-pressed',String(t==='hex'));});
+    ['#conTab','#conTab2'].forEach(s=>{const b=$(s);if(b)b.setAttribute('aria-pressed',String(t==='con'));});
+  }
+  function syncPaneTabs(){$$('#paneTabs .tbtn').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.pane===wb.dataset.pane)));}
+  function showData(which){
+    hexTarget=which;dataChip.setAttribute('aria-pressed',String(which==='expected'));
+    renderHex();setBottomTab('hex');
+    if(which!=='fn')log('mem','inspecting '+DATA[which].label+' @ '+hex(DATA[which].addr,6),'info');
+  }
+  /* events */
+  traceBtn.addEventListener('click',run);
+  stepBtn.addEventListener('click',step);
+  resetBtn.addEventListener('click',()=>reset(false));
+  keyInput.addEventListener('input',()=>{if(running||S.halted||steps)reset(true);wb.classList.remove('cracked');});
+  dataChip.addEventListener('click',()=>showData(hexTarget==='expected'?'fn':'expected'));
+  hintBtn.addEventListener('click',()=>{const on=hintBar.classList.toggle('show');hintBtn.setAttribute('aria-pressed',String(on));});
+  xrefChip.addEventListener('click',()=>{const x=FNS[curFn].xref;if(x){selectFn(x.fn);markSel(x.idx);}});
+  fnList.addEventListener('click',e=>{const b=e.target.closest('[data-fn]');if(b)selectFn(b.dataset.fn);});
+  $$('.fn-item[data-sym]').forEach(b=>b.addEventListener('click',()=>showData(b.dataset.sym)));
+  disRows.addEventListener('click',e=>{const r=e.target.closest('[data-i]');if(r)markSel(+r.dataset.i);});
+  hexRows.addEventListener('click',e=>{const h=e.target.closest('[data-i]');if(h){markSel(+h.dataset.i);}});
+  disRows.addEventListener('pointerover',e=>{const r=e.target.closest('[data-i]');if(r&&hexTarget==='fn')hexRows.querySelectorAll('[data-i="'+r.dataset.i+'"]').forEach(x=>x.classList.add('sel'));});
+  disRows.addEventListener('pointerout',e=>{const r=e.target.closest('[data-i]');if(r&&selIdx!==+r.dataset.i)hexRows.querySelectorAll('[data-i="'+r.dataset.i+'"]').forEach(x=>x.classList.remove('sel'));});
+  ['#hexTab','#hexTab2'].forEach(s=>{const b=$(s);if(b)b.addEventListener('click',()=>setBottomTab('hex'));});
+  ['#conTab','#conTab2'].forEach(s=>{const b=$(s);if(b)b.addEventListener('click',()=>setBottomTab('con'));});
+  $$('#paneTabs .tbtn').forEach(b=>b.addEventListener('click',()=>{wb.dataset.pane=b.dataset.pane;syncPaneTabs();}));
+  matchMedia('(min-width:881px)').addEventListener('change',()=>setBottomTab(wb.dataset.btab||'hex'));
+  document.addEventListener('visibilitychange',()=>{if(document.hidden&&running)pause();});
+  /* init */
+  renderFns();renderDis();renderDec();renderHex();renderRegs(false);setBottomTab('hex');
+  return{
+    run(){if(!running)run();},pause,reset,
+    reveal(){keyInput.value=KEY_SECRET;reset(true);toast('Spoiler loaded — press ▶ Trace to watch it pass','info');},
+    showData(){showData('expected');},
+    setKey(k){keyInput.value=k;reset(true);}
+  };
+})();
+
+/* hero watch button */
+(function(){
+  const b=$('#watchTraceBtn');let t=null;
+  b.addEventListener('click',()=>{
+    scrollToId('workbench');clearTimeout(t);
+    t=setTimeout(()=>DEMO.run(),RM?100:650);
+  });
+})();
+
+/* ---------- features: raw/opt toggle ---------- */
+(function(){
+  const raw=$('#segRaw'),opt=$('#segOpt'),sr=$('#snipRaw'),so=$('#snipOpt');
+  function set(o){raw.setAttribute('aria-pressed',String(!o));opt.setAttribute('aria-pressed',String(o));sr.classList.toggle('on',!o);so.classList.toggle('on',o);}
+  raw.addEventListener('click',()=>set(false));opt.addEventListener('click',()=>set(true));
+})();
+/* features: time-travel scrubber */
+(function(){
+  const r=$('#scrub');if(!r)return;
+  const SNAPS=[
+    ['0x4011a0','push rbp','0x0'],['0x4011ac','call strlen@plt','0x0'],
+    ['0x4011b1','cmp rax, 0x10','0x10'],['0x4011be','mov eax, [rbp-0x4]','0x0'],
+    ['0x4011cc','xor eax, 0x2a','0x48'],['0x4011d9','cmp al, [rdx+rcx]','0x62'],
+    ['0x4011de','add dword [rbp-0x4], 1','0x62'],['0x4011f2','ret','0x1']
+  ];
+  function apply(){
+    const s=SNAPS[+r.value];
+    $('#scrubStep').textContent='snapshot '+(+r.value+1)+' / 8';
+    $('#scrubRip').textContent='rip '+s[0];
+    $('#scrubInsn').textContent=s[1];
+    $('#scrubRax').textContent='rax = '+s[2];
+  }
+  r.addEventListener('input',apply);apply();
+})();
+/* features: call graph hover */
+(function(){
+  const svg=$('#cg');if(!svg)return;
+  svg.querySelectorAll('.cg-node').forEach(n=>{
+    n.addEventListener('pointerenter',()=>svg.dataset.hot=n.dataset.n);
+    n.addEventListener('pointerleave',()=>delete svg.dataset.hot);
+  });
+})();
+
+/* ---------- scripting ---------- */
+const SCRIPTS={
+  triage:{plain:'import hexlight as hl\n\ndoc = hl.current()\nfor fn in doc.functions:\n    for insn in fn.insns:\n        if insn.mnem == "xor" and insn.ops[1].imm == 0x2a:\n            fn.rename(f"xor_gate_{fn.addr:x}")\n            fn.set_type("int32_t (const char* key)")\n            hl.comment(fn.addr, "license gate — see g_expected")\nprint(hl.summary())',
+    html:['<span class="kw">import</span> hexlight <span class="kw">as</span> hl','','doc = hl.<span class="fn">current</span>()','<span class="kw">for</span> fn <span class="kw">in</span> doc.functions:','    <span class="kw">for</span> insn <span class="kw">in</span> fn.insns:','        <span class="kw">if</span> insn.mnem == <span class="st">"xor"</span> <span class="kw">and</span> insn.ops[<span class="nu">1</span>].imm == <span class="nu">0x2a</span>:','            fn.<span class="fn">rename</span>(<span class="st">f"xor_gate_{fn.addr:x}"</span>)','            fn.<span class="fn">set_type</span>(<span class="st">"int32_t (const char* key)"</span>)','            hl.<span class="fn">comment</span>(fn.addr, <span class="st">"license gate — see g_expected"</span>)','<span class="fn">print</span>(hl.<span class="fn">summary</span>())'],
+    out:[['scan','6 functions · 83 instructions','info'],['hit','0x4011a0  xor eax, 0x2a','warn'],['ren','sub_4011a0 → xor_gate_4011a0','info'],['type','int32_t (const char* key)  ✓ applied','info'],['done','1 gate annotated in 0.03 s','ok']]},
+  emulate:{plain:'from hexlight import emulate\n\ncpu = emulate.load("crackme.elf", arch="x86-64")\ncpu.write(0x404060, b"HELLO-WORLD-1234\\0")\ncpu.set_reg("rdi", 0x404060)\nresult = cpu.call(0x4011a0)\nprint(f"check_license → {result}")',
+    html:['<span class="kw">from</span> hexlight <span class="kw">import</span> emulate','','cpu = emulate.<span class="fn">load</span>(<span class="st">"crackme.elf"</span>, arch=<span class="st">"x86-64"</span>)','cpu.<span class="fn">write</span>(<span class="nu">0x404060</span>, <span class="st">b"HELLO-WORLD-1234\\0"</span>)','cpu.<span class="fn">set_reg</span>(<span class="st">"rdi"</span>, <span class="nu">0x404060</span>)','result = cpu.<span class="fn">call</span>(<span class="nu">0x4011a0</span>)','<span class="fn">print</span>(<span class="st">f"check_license → {result}"</span>)'],
+    out:[['emu','mapped 3 segments · 12 KiB · x86-64','info'],['call','0x4011a0("HELLO-WORLD-1234")','info'],['ret','eax = 0x0','warn'],['out','check_license → 0  (rejected in 214 insns, 0.4 ms)','ok'],['hint','the right key is hiding in the workbench upstairs…','dim']]},
+  sync:{plain:'import hexlight as hl\n\nteam = hl.connect("wss://studio.hexlight.dev/acme")\ndoc = hl.current()\npushed = doc.symbols.push(team, since="last-sync")\nfor ack in team.presence():\n    print(f"{ack.user} is viewing {ack.fn:#x}")',
+    html:['<span class="kw">import</span> hexlight <span class="kw">as</span> hl','','team = hl.<span class="fn">connect</span>(<span class="st">"wss://studio.hexlight.dev/acme"</span>)','doc = hl.<span class="fn">current</span>()','pushed = doc.symbols.<span class="fn">push</span>(team, since=<span class="st">"last-sync"</span>)','<span class="kw">for</span> ack <span class="kw">in</span> team.<span class="fn">presence</span>():','    <span class="fn">print</span>(<span class="st">f"{ack.user} is viewing {ack.fn:#x}"</span>)'],
+    out:[['sync','↑ 14 symbols · 3 types · 1 comment','info'],['ack','vex renamed sub_4011f0 → license_fail','info'],['ack','kenji is viewing 0x401200','info'],['ok','workspace converged · 0 conflicts','ok']]}
+};
+(function(){
+  const code=$('#scrCode'),out=$('#scrOut'),runB=$('#scrRun'),copyB=$('#scrCopy'),led=$('#scrLed'),stat=$('#scrStatus');
+  let cur='triage',timers=[],running=false;
+  function clearTimers(){timers.forEach(clearTimeout);timers=[];}
+  function renderCode(){code.innerHTML=SCRIPTS[cur].html.map(l=>'<span class="cl">'+(l||' ')+'</span>').join('');}
+  function addLog(tag,msg,cls){
+    const row=document.createElement('div');row.className='log '+cls;
+    const t=document.createElement('span');t.className='tag';t.textContent='['+tag+']';
+    const m=document.createElement('span');m.className='msg';m.textContent=msg;
+    row.appendChild(t);row.appendChild(m);out.appendChild(row);out.scrollTop=out.scrollHeight;
+  }
+  function stop(){clearTimers();running=false;runB.disabled=false;runB.textContent='▶ Run';}
+  function select(k){
+    cur=k;stop();out.innerHTML='';led.className='led';
+    stat.textContent='python 3.12 · embedded · ready — '+k+'.py loaded';
+    $$('.ed-tab').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.scr===k)));
+    renderCode();
+    addLog('idle','press ▶ Run to execute '+k+'.py against crackme.elf','dim');
+  }
+  function run(){
+    if(running)return;
+    clearTimers();out.innerHTML='';running=true;runB.disabled=true;runB.textContent='⏳ Running';
+    led.className='led run';stat.textContent='executing '+cur+'.py …';
+    const lines=SCRIPTS[cur].out;
+    lines.forEach((l,i)=>{timers.push(setTimeout(()=>{
+      addLog(l[0],l[1],l[2]);
+      if(i===lines.length-1){running=false;runB.disabled=false;runB.textContent='▶ Run again';led.className='led ok';stat.textContent='exit 0 · '+cur+'.py · '+(0.02+i*0.01).toFixed(2)+' s';}
+    },350+i*430));});
+  }
+  $$('.ed-tab').forEach(b=>b.addEventListener('click',()=>select(b.dataset.scr)));
+  runB.addEventListener('click',run);
+  copyB.addEventListener('click',()=>copyText(SCRIPTS[cur].plain,cur+'.py copied'));
+  const emu=$('#emuLink');if(emu)emu.addEventListener('click',()=>{select('emulate');run();});
+  select('triage');
+})();
+
+/* ---------- benchmarks ---------- */
+(function(){
+  const DATA={
+    cold:{sqlite3:[0.42,3.1,1.9],ffmpeg:[2.3,18.6,11.2],chrome:[38,412,267]},
+    warm:{sqlite3:[0.08,1.2,0.7],ffmpeg:[0.5,7.4,4.1],chrome:[9.2,156,98]}
+  };
+  const GROUPS=[['sqlite3','sqlite3','1.4 MB'],['ffmpeg','ffmpeg','7.8 MB'],['chrome','chrome.dll','186 MB']];
+  const SERIES=[['Hexlight 1.4','h'],['Disasm G','g'],['Suite I','i']];
+  const box=$('#benchGroups');if(!box)return;
+  box.innerHTML=GROUPS.map(g=>'<div class="bgroup"><div class="bg-head"><b>'+g[1]+'</b><span>'+g[2]+'</span></div>'+
+    SERIES.map((s,i)=>'<div class="brow"><span class="bl">'+s[0]+'</span><div class="btrack"><div class="bfill bf-'+s[1]+'" data-g="'+g[0]+'" data-s="'+i+'" data-v="0"></div></div><span class="bval" data-g="'+g[0]+'" data-s="'+i+'">—</span></div>').join('')+'</div>').join('');
+  let mode='cold',revealed=false,cancels=[];
+  const fmt=v=>(v<10?v.toFixed(2):v<100?v.toFixed(1):Math.round(v))+' s';
+  function apply(){
+    if(!revealed)return;
+    cancels.forEach(c=>c());cancels=[];
+    GROUPS.forEach(g=>{
+      const vals=DATA[mode][g[0]],max=Math.max.apply(null,vals);
+      vals.forEach((v,i)=>{
+        const fill=box.querySelector('.bfill[data-g="'+g[0]+'"][data-s="'+i+'"]');
+        const lbl=box.querySelector('.bval[data-g="'+g[0]+'"][data-s="'+i+'"]');
+        fill.style.width=Math.max(1.2,(v/max)*100)+'%';
+        const from=parseFloat(fill.dataset.v||'0');fill.dataset.v=v;
+        cancels.push(tween(from,v,900,x=>{lbl.textContent=fmt(x);}));
+      });
+    });
+  }
+  $$('.bmode').forEach(b=>b.addEventListener('click',()=>{
+    mode=b.dataset.mode;
+    $$('.bmode').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));
+    apply();
+  }));
+  new IntersectionObserver((es,obs)=>{if(es[0].isIntersecting){revealed=true;apply();obs.disconnect();}},{threshold:.25}).observe(box);
+})();
+
+/* ---------- pricing + modal ---------- */
+let billing='y';
+(function(){
+  const nums=$$('.price .num[data-m]');
+  $$('.bill').forEach(b=>b.addEventListener('click',()=>{
+    billing=b.dataset.bill;
+    $$('.bill').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));
+    $('#saveChip').style.opacity=billing==='y'?'1':'.25';
+    nums.forEach(n=>{
+      const from=parseFloat(n.textContent)||0,to=parseFloat(billing==='y'?n.dataset.y:n.dataset.m);
+      tween(from,to,450,v=>{n.textContent=Math.round(v);});
+    });
+    $$('[data-per]').forEach(p=>{p.textContent=p.textContent.includes('seat')?(billing==='y'?'/seat/mo · billed yearly':'/seat/mo · billed monthly'):(billing==='y'?'/mo · billed yearly · 1 seat':'/mo · billed monthly · 1 seat');});
+  }));
+})();
+const MODAL=(function(){
+  const ov=$('#modal'),form=$('#trialForm'),email=$('#trialEmail'),err=$('#trialErr'),sub=$('#trialSubmit');
+  const fw=$('#trialFormWrap'),ok=$('#trialSuccess');
+  let plan='Pro',timer=null,opener=null;
+  const valid=v=>/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v);
+  function open(p,from){
+    plan=p;opener=from||document.activeElement;
+    $('#modalTitle').textContent='Start your '+(p==='Pro'?'Pro':'Studio team')+' trial';
+    const price=p==='Pro'?(billing==='y'?12:16):(billing==='y'?39:49);
+    $('#modalPrice').textContent='$'+price+(p==='Pro'?'/mo':'/seat/mo')+' after';
+    fw.style.display='';ok.classList.remove('show');err.classList.remove('show');
+    sub.classList.remove('loading');sub.disabled=false;
+    ov.classList.add('open');document.body.style.overflow='hidden';
+    setTimeout(()=>email.focus(),60);
+  }
+  function close(){
+    clearTimeout(timer);ov.classList.remove('open');document.body.style.overflow='';
+    if(opener&&opener.focus)opener.focus();
+  }
+  form.addEventListener('submit',e=>{
+    e.preventDefault();
+    const v=email.value.trim();
+    if(!valid(v)){err.classList.remove('show');void err.offsetWidth;err.classList.add('show');email.focus();return;}
+    err.classList.remove('show');sub.classList.add('loading');sub.disabled=true;
+    timer=setTimeout(()=>{
+      const seg=()=>{const c='ABCDEFGHJKMNPQRSTUVWXYZ23456789';let s='';for(let i=0;i<4;i++)s+=c[(Math.random()*c.length)|0];return s;};
+      $('#keyOut').textContent='HXL-'+(plan==='Pro'?'PRO':'STD')+'-'+seg()+'-'+seg();
+      $('#keyEmail').textContent=v;
+      fw.style.display='none';ok.classList.add('show');
+      sub.classList.remove('loading');sub.disabled=false;
+      toast('Trial key generated for '+plan,'ok');
+      $('#successDone').focus();
+    },900);
+  });
+  $('#copyKeyBtn').addEventListener('click',()=>copyText($('#keyOut').textContent,'Trial key copied'));
+  $('#successDone').addEventListener('click',close);
+  $('#modalClose').addEventListener('click',close);
+  ov.addEventListener('click',e=>{if(e.target===ov)close();});
+  ov.addEventListener('keydown',e=>{
+    if(e.key==='Escape'){close();return;}
+    if(e.key!=='Tab')return;
+    const f=Array.from(ov.querySelectorAll('button,input')).filter(x=>x.offsetParent!==null);
+    if(!f.length)return;
+    const first=f[0],last=f[f.length-1];
+    if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}
+    else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
+  });
+  return{open,close,isOpen:()=>ov.classList.contains('open')};
+})();
+$('#trialProBtn').addEventListener('click',e=>MODAL.open('Pro',e.currentTarget));
+$('#trialTeamBtn').addEventListener('click',e=>MODAL.open('Studio',e.currentTarget));
+
+/* ---------- downloads ---------- */
+const OS=(function(){
+  const p=((navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform||navigator.userAgent||'').toLowerCase();
+  if(p.includes('win'))return'windows';
+  if(p.includes('mac'))return'macos';
+  return'linux';
+})();
+const CMDS={windows:'winget install Hexlight.Hexlight',linux:'curl -fsSL https://hexlight.dev/install.sh | sh',macos:'brew install hexlight'};
+(function(){
+  const card=$('.dl-card[data-os="'+OS+'"]');if(card)card.classList.add('rec');
+  const FILES={
+    windows:{name:'install-hexlight.ps1',mime:'text/plain',body:'# Hexlight 1.4.2 "Prism" — Windows installer (demo stub)\n# Real build installs via: winget install Hexlight.Hexlight\nWrite-Host "Hexlight 1.4.2 (Prism) — x86-64 / arm64"\nWrite-Host "This demo stub would run: winget install Hexlight.Hexlight"\nWrite-Host "sha256: 9f2c41d7a83b...b0e83a1f"\n'},
+    linux:{name:'install-hexlight.sh',mime:'text/x-shellscript',body:'#!/bin/sh\n# Hexlight 1.4.2 "Prism" — POSIX installer (demo stub)\necho "Hexlight 1.4.2 (Prism) — $(uname -s) $(uname -m)"\necho "Real build: curl -fsSL https://hexlight.dev/install.sh | sh"\necho "sha256: 4a1be092cd71...9d20f6e8"\n'},
+    macos:{name:'install-hexlight.sh',mime:'text/x-shellscript',body:'#!/bin/sh\n# Hexlight 1.4.2 "Prism" — macOS installer (demo stub)\necho "Hexlight 1.4.2 (Prism) — $(uname -s) $(uname -m)"\necho "Real build: brew install hexlight"\necho "sha256: c83f11a0b9e2...47aa9c0d"\n'}
+  };
+  window.__dl=function(os){
+    const f=FILES[os]||FILES.linux;
+    const blob=new Blob([f.body],{type:f.mime});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=f.name;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),4000);
+    toast(f.name+' downloaded — demo stub installer','ok');
+  };
+  $$('.dl-btn').forEach(b=>b.addEventListener('click',()=>window.__dl(b.dataset.os)));
+  $$('[data-copy]').forEach(b=>b.addEventListener('click',()=>copyText(b.dataset.copy,b.dataset.copy.length>60?'Checksum copied':'Install command copied')));
+})();
+
+/* ---------- faq ---------- */
+$$('.faq-item').forEach(item=>{
+  const q=item.querySelector('.faq-q');
+  q.addEventListener('click',()=>{
+    const open=item.classList.contains('open');
+    $$('.faq-item.open').forEach(o=>{o.classList.remove('open');o.querySelector('.faq-q').setAttribute('aria-expanded','false');});
+    if(!open){item.classList.add('open');q.setAttribute('aria-expanded','true');}
+  });
+});
+
+/* ---------- newsletter ---------- */
+(function(){
+  const f=$('#newsForm'),e=$('#newsEmail'),err=$('#newsErr'),ok=$('#newsOk');
+  f.addEventListener('submit',ev=>{
+    ev.preventDefault();
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e.value.trim())){err.style.display='block';e.focus();return;}
+    err.style.display='none';f.style.display='none';ok.style.display='flex';
+    toast('Subscribed — one email per release, promise','ok');
+  });
+})();
+
+/* ---------- command palette ---------- */
+const PALETTE=(function(){
+  const ov=$('#palette'),input=$('#palInput'),list=$('#palList');
+  let items=[],flat=[],sel=0,opener=null;
+  const NAV_IC='<svg class="pi-ic" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>';
+  const ACT_IC='<svg class="pi-ic" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>';
+  const CMDS=[
+    {g:'Navigate',label:'Live workbench',hint:'#workbench',run:()=>scrollToId('workbench')},
+    {g:'Navigate',label:'Features',hint:'#features',run:()=>scrollToId('features')},
+    {g:'Navigate',label:'Scripting tour',hint:'#scripting',run:()=>scrollToId('scripting')},
+    {g:'Navigate',label:'Benchmarks',hint:'#benchmarks',run:()=>scrollToId('benchmarks')},
+    {g:'Navigate',label:'Pricing',hint:'#pricing',run:()=>scrollToId('pricing')},
+    {g:'Navigate',label:'Changelog',hint:'#changelog',run:()=>scrollToId('changelog')},
+    {g:'Navigate',label:'FAQ',hint:'#faq',run:()=>scrollToId('faq')},
+    {g:'Navigate',label:'Download',hint:'#download',run:()=>scrollToId('download')},
+    {g:'Actions',label:'Run the license trace',hint:'workbench',run:()=>{scrollToId('workbench');setTimeout(()=>DEMO.run(),600);}},
+    {g:'Actions',label:'Inspect g_expected bytes',hint:'.rodata',run:()=>{scrollToId('workbench');DEMO.showData();}},
+    {g:'Actions',label:'Reveal license key (spoiler)',hint:'crackme',run:()=>{scrollToId('workbench');DEMO.reveal();}},
+    {g:'Actions',label:'Copy install command',hint:OS,run:()=>copyText(CMDS[OS],'Install command copied')},
+    {g:'Actions',label:'Download installer for this OS',hint:OS,run:()=>window.__dl(OS)},
+    {g:'Actions',label:'Start Pro trial',hint:'14 days',run:()=>MODAL.open('Pro')},
+    {g:'Actions',label:'Start Studio trial',hint:'team',run:()=>MODAL.open('Studio')}
+  ];
+  function score(label,q){
+    if(!q)return{s:1,m:[]};
+    const L=label.toLowerCase();let qi=0,m=[],s=0,last=-1;
+    for(let i=0;i<L.length&&qi<q.length;i++){
+      if(L[i]===q[qi]){m.push(i);s+=(i===0||L[i-1]===' ')?12:4;if(last>=0)s-=Math.min(i-last-1,6);last=i;qi++;}
+    }
+    return qi===q.length?{s,m}:-1;
+  }
+  function markLabel(label,m){
+    let out='',mi=0;
+    for(let i=0;i<label.length;i++){
+      const c=label[i]==='<'?'&lt;':label[i];
+      if(mi<m.length&&m[mi]===i){out+='<mark>'+c+'</mark>';mi++;}else out+=c;
+    }
+    return out;
+  }
+  function render(){
+    const q=input.value.trim().toLowerCase();
+    flat=[];let html='',lastG='';
+    CMDS.forEach(c=>{
+      const r=score(c.label,q);if(r===-1)return;
+      flat.push({c,r});
+    });
+    flat.sort((a,b)=>b.r.s-a.r.s);
+    const groups={};
+    flat.forEach(f=>{(groups[f.c.g]=groups[f.c.g]||[]).push(f);});
+    flat=[];
+    ['Navigate','Actions'].forEach(g=>{
+      if(!groups[g])return;
+      html+='<div class="pal-group">'+g+'</div>';
+      groups[g].forEach(f=>{
+        const idx=flat.length;flat.push(f);
+        html+='<button class="pal-item'+(idx===sel?' sel':'')+'" role="option" id="pal-o-'+idx+'" aria-selected="'+(idx===sel)+'" data-pi="'+idx+'">'+(g==='Navigate'?NAV_IC:ACT_IC)+'<span>'+markLabel(f.c.label,f.r.m)+'</span><span class="pi-k">'+f.c.hint+'</span></button>';
+      });
+    });
+    if(!flat.length)html='<div class="pal-empty">no match — try “trace”, “price”, “install”…</div>';
+    list.innerHTML=html;
+    input.setAttribute('aria-activedescendant',flat.length?'pal-o-'+sel:'');
+  }
+  function open(){
+    opener=document.activeElement;
+    ov.classList.add('open');document.body.style.overflow='hidden';
+    input.value='';sel=0;render();
+    setTimeout(()=>input.focus(),40);
+  }
+  function close(){
+    ov.classList.remove('open');document.body.style.overflow='';
+    if(opener&&opener.focus)opener.focus();
+  }
+  function exec(i){
+    const f=flat[i];if(!f)return;
+    close();setTimeout(f.c.run,60);
+  }
+  function move(d){
+    if(!flat.length)return;
+    sel=(sel+d+flat.length)%flat.length;render();
+    const el=list.querySelector('[data-pi="'+sel+'"]');
+    if(el)el.scrollIntoView({block:'nearest'});
+  }
+  input.addEventListener('input',()=>{sel=0;render();});
+  input.addEventListener('keydown',e=>{
+    if(e.key==='ArrowDown'){e.preventDefault();move(1);}
+    else if(e.key==='ArrowUp'){e.preventDefault();move(-1);}
+    else if(e.key==='Enter'){e.preventDefault();exec(sel);}
+    else if(e.key==='Escape'){close();}
+  });
+  list.addEventListener('click',e=>{const b=e.target.closest('[data-pi]');if(b)exec(+b.dataset.pi);});
+  list.addEventListener('pointermove',e=>{const b=e.target.closest('[data-pi]');if(b&&+b.dataset.pi!==sel){sel=+b.dataset.pi;render();}});
+  ov.addEventListener('click',e=>{if(e.target===ov)close();});
+  return{open,close,toggle:()=>ov.classList.contains('open')?close():open(),isOpen:()=>ov.classList.contains('open')};
+})();
+$('#cmdkBtn').addEventListener('click',PALETTE.open);
+$$('.cmdk-open').forEach(b=>b.addEventListener('click',PALETTE.open));
+
+/* ---------- global keys ---------- */
+addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&(e.key==='k'||e.key==='K')){e.preventDefault();PALETTE.toggle();return;}
+  if(e.key==='Escape'){
+    if(PALETTE.isOpen())PALETTE.close();
+    else if(MODAL.isOpen())MODAL.close();
+    else closeMenu();
+  }
+});
+})();
+</script>
+</body>
+</html>
